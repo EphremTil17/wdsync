@@ -1,0 +1,3 @@
+# Windows source repo mirrored into this WSL repo
+# Used by the wdsync Python CLI
+SRC=/mnt/c/Users/YourName/path/to/WindowsRepo

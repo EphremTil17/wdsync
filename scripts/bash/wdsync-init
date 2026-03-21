@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_path="$(readlink -f "$0")"
+project_root="$(cd "$(dirname "$script_path")/../.." && pwd)"
+resolved="$(command -v wdsync || true)"
+
+if [[ -n "${resolved}" ]] && [[ "$(readlink -f "${resolved}")" != "${script_path}" ]]; then
+  exec "${resolved}" init "$@"
+fi
+
+exec uv run --project "${project_root}" wdsync init "$@"

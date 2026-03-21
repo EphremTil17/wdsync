@@ -1,0 +1,100 @@
+[build-system]
+requires = ["hatchling>=1.29.0"]
+build-backend = "hatchling.build"
+
+[project]
+# Core package/runtime contract
+name = "wdsync"
+version = "0.1.0"
+description = "Mirror dirty files from a Windows Git repo into a matching WSL repo."
+requires-python = ">=3.11"
+dependencies = [
+  "typer>=0.24.1,<1.0",
+]
+
+# Publishing metadata
+readme = { file = "README.md", content-type = "text/markdown" }
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Ephrem T.", email = "ephtilahun21@gmail.com" },
+]
+keywords = [
+  "wsl",
+  "windows",
+  "git",
+  "sync",
+  "cli",
+  "rsync",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Version Control :: Git",
+  "Topic :: Utilities",
+  "Typing :: Typed",
+]
+
+# Publishing links
+[project.urls]
+Homepage = "https://github.com/EphremTil17/wdsync"
+Repository = "https://github.com/EphremTil17/wdsync"
+Issues = "https://github.com/EphremTil17/wdsync/issues"
+Changelog = "https://github.com/EphremTil17/wdsync/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/EphremTil17/wdsync#readme"
+
+# Installed CLI entry points
+[project.scripts]
+wdsync = "wdsync.cli:main"
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.5.1",
+  "pyright>=1.1.408",
+  "pytest>=9.0.2",
+  "pytest-cov>=7.0.0",
+  "ruff>=0.15.7",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wdsync"]
+
+[tool.pytest.ini_options]
+addopts = "-q --cov=src/wdsync --cov-report=term-missing"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["src/wdsync"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "strict"
+include = ["src", "tests"]
+venvPath = "."
+venv = ".venv"
