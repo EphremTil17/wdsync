@@ -27,9 +27,11 @@ From inside a destination WSL repo, `wdsync` will:
 
 > Note:
 > It includes tracked unstaged files, tracked staged files, and untracked files,
-> including nested files in untracked directories. In v1 it intentionally does
-> not do delete propagation, patch-apply checks, staging/index mirroring, or
-> global config.
+> including nested files in untracked directories. Deleted files detected in the
+> source are propagated to the destination (removed from the WSL repo). If a
+> deletion fails due to permissions, `wdsync` prompts to retry with `sudo`. Files
+> with local changes in the destination are never deleted. It does not yet do
+> patch-apply checks, staging/index mirroring, or global config.
 
 ## Prerequisites
 
@@ -156,15 +158,18 @@ delegate to the installed CLI or fall back to `uv run`.
 Source dirty-file detection comes from `git.exe`, not Linux Git. Preview shows
 the full source dirty set rather than a destination diff, and sync copies file
 contents only. A source staged file does not remain staged in the destination
-repo. Deleted files are previewed but skipped in v1 so they never break
-`rsync`, while renames and copies are parsed correctly from porcelain v1 `-z`
-and untracked directories are expanded to leaf file paths.
+repo. Deleted files are propagated to the destination: if a file was deleted in
+the Windows source, `wdsync sync` removes it from the WSL repo. Files that have
+local changes in the destination are skipped to avoid destroying local work. If
+a deletion fails due to file permissions, `wdsync` will prompt to retry with
+`sudo`. Renames and copies are parsed correctly from porcelain v1 `-z` and
+untracked directories are expanded to leaf file paths.
 
 ## Limitations
 
 `wdsync` is WSL-only, supports one source path per destination repo, and
-expects the source path to live under `/mnt/<drive>/...`. In v1 it does not
-propagate deletes, run patch-apply checks, or support post-sync hooks.
+expects the source path to live under `/mnt/<drive>/...`. It does not yet run
+patch-apply checks or support post-sync hooks.
 
 See [IN_DEVELOPMENT.md](docs/IN_DEVELOPMENT.md) for the roadmap beyond the current
 Python CLI baseline.

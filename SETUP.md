@@ -102,6 +102,9 @@ wdsync doctor
 - `wdsync` must be run from inside the destination Git repo.
 - It helps to be on the same branch in both repos, but it is not required.
 - Source dirty detection comes from `git.exe`, not Linux Git.
-- Sync copies file contents only.
-- Deleted files are previewed but skipped in v1.
-- A source staged file does not remain staged in the destination repo.
+- Sync copies file contents only. A source staged file does not remain staged
+  in the destination repo.
+- Deleted source files are propagated: `wdsync sync` removes them from the
+  destination. Files with local changes in the destination are skipped to avoid
+  data loss. If a deletion fails due to permissions, `wdsync` will prompt to
+  retry with `sudo`.

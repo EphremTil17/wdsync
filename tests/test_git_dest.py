@@ -30,3 +30,33 @@ def test_read_destination_state_counts_modified_staged_and_untracked_files(
     assert state.staged_count == 1
     assert state.untracked_count == 1
     assert state.is_dirty is True
+
+
+def test_wt_deleted_paths_populated(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+) -> None:
+    repo = repo_factory("dest", files={"file.txt": "content\n"})
+    (repo / "file.txt").unlink()  # produces " D" status
+
+    state = read_destination_state(repo, git_runner)
+
+    assert "file.txt" in state.wt_deleted_paths
+    assert "file.txt" in state.dirty_paths
+
+
+def test_staged_deletion_excluded_from_wt_deleted(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+) -> None:
+    repo = repo_factory("dest", files={"file.txt": "content\n"})
+    subprocess.run(
+        ["git", "-C", str(repo), "rm", "-q", "file.txt"],
+        check=True,
+        capture_output=True,
+    )  # produces "D " status
+
+    state = read_destination_state(repo, git_runner)
+
+    assert "file.txt" not in state.wt_deleted_paths
+    assert "file.txt" in state.dirty_paths

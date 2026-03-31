@@ -201,7 +201,13 @@ def test_build_doctor_report_marks_clean_repos_as_low_risk(
     report = doctor.build_doctor_report(
         _project_config(),
         SourceState(head="abc123", entries=()),
-        DestinationState(head="abc123", modified_count=0, staged_count=0, untracked_count=0),
+        DestinationState(
+            head="abc123",
+            modified_count=0,
+            staged_count=0,
+            untracked_count=0,
+            dirty_paths=frozenset(),
+        ),
         cast(CommandRunner, object()),
     )
 
@@ -227,7 +233,13 @@ def test_build_doctor_report_uses_different_message_for_unrelated_heads(
     report = doctor.build_doctor_report(
         _project_config(),
         SourceState(head="source", entries=()),
-        DestinationState(head="dest", modified_count=0, staged_count=0, untracked_count=0),
+        DestinationState(
+            head="dest",
+            modified_count=0,
+            staged_count=0,
+            untracked_count=0,
+            dirty_paths=frozenset(),
+        ),
         cast(CommandRunner, object()),
     )
 

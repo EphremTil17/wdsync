@@ -23,18 +23,26 @@ def read_destination_state(dest_root: Path, runner: CommandRunner) -> Destinatio
     modified_count = 0
     staged_count = 0
     untracked_count = 0
+    dirty_paths: set[str] = set()
+    wt_deleted_paths: set[str] = set()
     for entry in entries:
         if entry.raw_xy == "??":
             untracked_count += 1
             continue
         if entry.raw_xy[0] not in {" ", "?"}:
             staged_count += 1
+            dirty_paths.add(entry.path)
         if entry.raw_xy[1] not in {" ", "?"}:
             modified_count += 1
+            dirty_paths.add(entry.path)
+        if entry.raw_xy == " D":
+            wt_deleted_paths.add(entry.path)
 
     return DestinationState(
         head=read_destination_head(dest_root, runner),
         modified_count=modified_count,
         staged_count=staged_count,
         untracked_count=untracked_count,
+        dirty_paths=frozenset(dirty_paths),
+        wt_deleted_paths=frozenset(wt_deleted_paths),
     )

@@ -39,6 +39,22 @@ class ShellDetectionError(WdSyncError):
     """Raised when the active shell cannot be detected safely."""
 
 
+class DeletionError(WdSyncError):
+    """Raised when a file deletion fails in a non-recoverable way."""
+
+    def __init__(self, message: str, *, path: str) -> None:
+        super().__init__(message)
+        self.path = path
+
+
+class SudoDeleteError(DeletionError):
+    """Raised when sudo rm fails for a permission-protected file."""
+
+    def __init__(self, path: str, *, returncode: int) -> None:
+        super().__init__(f"wdsync: sudo rm failed for {path!r} (exit {returncode})", path=path)
+        self.returncode = returncode
+
+
 class CommandExecutionError(WdSyncError):
     """Raised when an external command exits unsuccessfully."""
 

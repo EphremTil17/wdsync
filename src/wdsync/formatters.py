@@ -49,6 +49,8 @@ def sync_to_json(result: SyncResult) -> SyncJSON:
         "dest_root": str(result.plan.dest_root),
         "total": len(result.plan.preview_rows),
         "copied_count": result.copied_count,
+        "deleted_count": result.deleted_count,
+        "restored_count": result.restored_count,
         "skipped_count": result.skipped_count,
         "performed_copy": result.performed_copy,
         "warnings": list(result.plan.warnings),
@@ -111,12 +113,16 @@ def format_preview(plan: SyncPlan) -> str:
 
 
 def format_sync_result(result: SyncResult) -> str:
-    if not result.plan.preview_rows:
+    has_actions = bool(result.plan.preview_rows or result.restored_count or result.deleted_count)
+    if not has_actions:
         return "wdsync: nothing to sync"
 
-    lines = [f"wdsync: {len(result.plan.preview_rows)} file(s):", ""]
-    for row in result.plan.preview_rows:
-        lines.append(f"  [{row.label:<9}] [{row.raw_xy}]  {row.path}")
+    lines: list[str] = []
+    if result.plan.preview_rows:
+        lines.append(f"wdsync: {len(result.plan.preview_rows)} file(s):")
+        lines.append("")
+        for row in result.plan.preview_rows:
+            lines.append(f"  [{row.label:<9}] [{row.raw_xy}]  {row.path}")
 
     if result.plan.warnings:
         lines.append("")
@@ -127,10 +133,14 @@ def format_sync_result(result: SyncResult) -> str:
     if result.performed_copy:
         lines.append(f"Syncing {result.plan.source_root} -> {result.plan.dest_root} ...")
         lines.append(f"Done. Synced {result.copied_count} file(s).")
-    else:
-        lines.append(f"Nothing to copy into {result.plan.dest_root}.")
+    if result.restored_count:
+        lines.append(f"Restored {result.restored_count} file(s).")
+    if result.deleted_count:
+        lines.append(f"Deleted {result.deleted_count} file(s).")
     if result.skipped_count:
-        lines.append(f"Skipped {result.skipped_count} deleted file(s).")
+        lines.append(f"Skipped {result.skipped_count} file(s).")
+    if not result.performed_copy and not result.restored_count and not result.deleted_count:
+        lines.append(f"Nothing to copy into {result.plan.dest_root}.")
     return "\n".join(lines)
 
 

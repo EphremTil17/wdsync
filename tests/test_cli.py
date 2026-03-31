@@ -176,6 +176,7 @@ def test_preview_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatc
             ),
         ),
         copy_paths=("tracked.txt",),
+        delete_paths=(),
         skipped_paths=(),
         warnings=(),
     )
@@ -234,10 +235,13 @@ def test_sync_command_uses_real_flow_with_text(monkeypatch: pytest.MonkeyPatch) 
             ),
         ),
         copy_paths=("tracked.txt",),
+        delete_paths=(),
         skipped_paths=(),
         warnings=(),
     )
-    sync_result = SyncResult(plan=plan, copied_count=1, skipped_count=0, performed_copy=True)
+    sync_result = SyncResult(
+        plan=plan, copied_count=1, deleted_count=0, skipped_count=0, performed_copy=True
+    )
 
     def load_project_config_stub(runner: CommandRunner) -> ProjectConfig:
         del runner
@@ -251,7 +255,17 @@ def test_sync_command_uses_real_flow_with_text(monkeypatch: pytest.MonkeyPatch) 
         del cfg, state
         return plan
 
-    def execute_sync_stub(built_plan: SyncPlan, runner: CommandRunner) -> SyncResult:
+    def read_destination_state_stub(dest_root: Path, runner: CommandRunner) -> DestinationState:
+        del dest_root, runner
+        return DestinationState(
+            head="abc123",
+            modified_count=0,
+            staged_count=0,
+            untracked_count=0,
+            dirty_paths=frozenset(),
+        )
+
+    def execute_sync_stub(built_plan: SyncPlan, runner: CommandRunner, **_: object) -> SyncResult:
         del built_plan, runner
         return sync_result
 
@@ -262,6 +276,7 @@ def test_sync_command_uses_real_flow_with_text(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
     monkeypatch.setattr(cli, "load_project_config", load_project_config_stub)
     monkeypatch.setattr(cli, "read_source_state", read_source_state_stub)
+    monkeypatch.setattr(cli, "read_destination_state", read_destination_state_stub)
     monkeypatch.setattr(cli, "build_sync_plan", build_sync_plan_stub)
     monkeypatch.setattr(cli, "execute_sync", execute_sync_stub)
     monkeypatch.setattr(cli, "format_sync_result", format_sync_result_stub)
@@ -286,6 +301,7 @@ def test_doctor_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatch
         modified_count=0,
         staged_count=0,
         untracked_count=0,
+        dirty_paths=frozenset(),
     )
     report = DoctorReport(
         source_head="abc123",

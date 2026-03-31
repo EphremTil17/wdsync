@@ -5,6 +5,59 @@ All notable changes to `wdsync` will be documented in this file.
 The format is based on Keep a Changelog, and this project aims to follow
 Semantic Versioning once formal releases begin.
 
+## [0.2.0] - 2026-03-30
+
+### Added
+
+- Deletion propagation: files deleted in the Windows source repo are now
+  removed from the WSL destination during `wdsync sync`.
+- Sudo escalation: if a deletion fails due to file permissions, `wdsync`
+  prompts the user to retry with `sudo`.
+- Destination-modified guard: files with local staged or unstaged changes in the
+  destination repo are never deleted, preventing accidental data loss.
+- Path traversal guard: delete paths that would escape the destination root are
+  blocked.
+- Empty directory pruning: parent directories left empty after deletion are
+  automatically removed up to the repo root.
+- Reconciliation: tracked files previously deleted by wdsync but restored in
+  the source are now automatically restored in the destination via
+  `git restore`.
+- Untracked file manifest: a `.wdsync-manifest` file inside `.git/` tracks
+  previously synced untracked files so orphans are cleaned up when the source
+  deletes them.
+- New `deleter` module (`src/wdsync/deleter.py`) handling all deletion edge
+  cases: absent files, symlinks, permission errors, read-only filesystems, and
+  path traversal.
+- New `manifest` module (`src/wdsync/manifest.py`) for reading and writing the
+  sync manifest.
+- New exception types `DeletionError` and `SudoDeleteError`.
+- New fields: `delete_paths` and `restore_paths` on `SyncPlan`;
+  `deleted_count` and `restored_count` on `SyncResult`; `dirty_paths` and
+  `wt_deleted_paths` on `DestinationState`.
+- Comprehensive unit and integration tests for deletion, reconciliation, and
+  manifest behavior.
+
+### Changed
+
+- `wdsync sync` now calls `read_destination_state` to check for local changes
+  before deleting files.
+- rsync flags changed from `-a` (archive) to `-rlt` (recursive, symlinks,
+  times) to avoid copying Windows file permissions into WSL.
+- Formatter output updated: "Restored N file(s).", "Deleted N file(s)." lines
+  added to sync results.
+- JSON output (`SyncJSON`) now includes `deleted_count` and `restored_count`
+  fields.
+- Version is now dynamically read from `pyproject.toml` via
+  `importlib.metadata` instead of a hardcoded string in `__init__.py`.
+- Config regex simplified (`\w` instead of `[A-Za-z0-9_]`) and trailing
+  whitespace stripping moved to Python to eliminate backtracking risk.
+- `deleter.py` refactored to reduce cognitive complexity (extracted
+  `_delete_one`, `_unlink_with_sudo_fallback` helpers).
+
+### Removed
+
+- The "v1 does not propagate deletions" warning is no longer emitted.
+
 ## [0.1.0] - 2026-03-20
 
 ### Added

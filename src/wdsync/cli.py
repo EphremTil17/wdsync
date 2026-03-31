@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Annotated, NoReturn, cast
 
 import typer
@@ -18,7 +19,8 @@ from wdsync.formatters import (
 )
 from wdsync.git_dest import read_destination_state
 from wdsync.git_source import read_source_state
-from wdsync.models import ShellName
+from wdsync.manifest import read_manifest, write_manifest
+from wdsync.models import ShellName, StatusKind
 from wdsync.planner import build_sync_plan
 from wdsync.runner import CommandRunner, build_runner
 from wdsync.shell import install_shell_assets
@@ -56,8 +58,43 @@ def _preview_flow(runner: CommandRunner, *, as_json: bool) -> None:
 def _sync_flow(runner: CommandRunner, *, as_json: bool) -> None:
     config = load_project_config(runner)
     source_state = read_source_state(config, runner)
+    destination_state = read_destination_state(config.dest_root, runner)
     plan = build_sync_plan(config, source_state)
-    result = execute_sync(plan, runner)
+
+    # Reconciliation: restore tracked files deleted in dest but no longer deleted in source
+    source_deleted_paths = frozenset(
+        entry.path for entry in source_state.entries if entry.kind is StatusKind.DELETED
+    )
+    restore_candidates = destination_state.wt_deleted_paths - source_deleted_paths
+    if restore_candidates:
+        plan = replace(plan, restore_paths=tuple(sorted(restore_candidates)))
+
+    # Manifest: detect orphaned untracked files from previous syncs
+    source_dirty_paths = frozenset(entry.path for entry in source_state.entries)
+    prev_untracked = read_manifest(config.dest_root)
+    orphaned = prev_untracked - source_dirty_paths
+    if orphaned:
+        plan = replace(plan, delete_paths=plan.delete_paths + tuple(sorted(orphaned)))
+
+    def _confirm_sudo(rel_path: str) -> bool:
+        return typer.confirm(
+            f"  Permission denied on {rel_path!r}. Retry with sudo?",
+            default=False,
+        )
+
+    result = execute_sync(
+        plan,
+        runner,
+        dest_dirty_paths=destination_state.dirty_paths,
+        confirm_sudo=_confirm_sudo,
+    )
+
+    # Update manifest with currently synced untracked files
+    current_untracked = frozenset(
+        entry.path for entry in source_state.entries if entry.kind is StatusKind.NEW
+    )
+    write_manifest(config.dest_root, current_untracked)
+
     typer.echo(render_json(sync_to_json(result)) if as_json else format_sync_result(result))
 
 

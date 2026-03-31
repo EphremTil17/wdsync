@@ -34,8 +34,9 @@ def _plan() -> SyncPlan:
             PreviewRow(path="gone.txt", raw_xy=" D", label="deleted", syncable=False),
         ),
         copy_paths=("tracked.txt",),
-        skipped_paths=("gone.txt",),
-        warnings=("1 deleted file(s) will be skipped because v1 does not propagate deletions.",),
+        delete_paths=("gone.txt",),
+        skipped_paths=(),
+        warnings=(),
     )
 
 
@@ -57,6 +58,7 @@ def _report(*, with_warnings: bool) -> DoctorReport:
             modified_count=1,
             staged_count=2,
             untracked_count=3,
+            dirty_paths=frozenset({"tracked.txt"}),
         ),
         warnings=warnings if with_warnings else (),
         risk_level=RiskLevel.MEDIUM if with_warnings else RiskLevel.LOW,
@@ -67,7 +69,7 @@ def test_preview_and_sync_json_include_expected_fields() -> None:
     plan = _plan()
     preview_payload = preview_to_json(plan)
     sync_payload = sync_to_json(
-        SyncResult(plan=plan, copied_count=1, skipped_count=1, performed_copy=True)
+        SyncResult(plan=plan, copied_count=1, deleted_count=1, skipped_count=0, performed_copy=True)
     )
 
     assert preview_payload["schema_version"] == 1
@@ -93,6 +95,7 @@ def test_format_preview_covers_empty_and_warning_cases() -> None:
         dest_root=Path("/tmp/dest"),
         preview_rows=(),
         copy_paths=(),
+        delete_paths=(),
         skipped_paths=(),
         warnings=(),
     )
@@ -102,14 +105,25 @@ def test_format_preview_covers_empty_and_warning_cases() -> None:
     rendered = format_preview(_plan())
     assert "[unstaged" in rendered
     assert "[deleted" in rendered
-    assert "warning:" in rendered
     assert "Dry run." in rendered
+
+    plan_with_warning = SyncPlan(
+        source_root=Path("/tmp/source"),
+        dest_root=Path("/tmp/dest"),
+        preview_rows=_plan().preview_rows,
+        copy_paths=_plan().copy_paths,
+        delete_paths=_plan().delete_paths,
+        skipped_paths=(),
+        warnings=("something was skipped",),
+    )
+    rendered_with_warning = format_preview(plan_with_warning)
+    assert "warning:" in rendered_with_warning
 
 
 def test_format_sync_result_covers_copy_and_nothing_to_copy_cases() -> None:
     plan = _plan()
     rendered = format_sync_result(
-        SyncResult(plan=plan, copied_count=1, skipped_count=1, performed_copy=True)
+        SyncResult(plan=plan, copied_count=1, deleted_count=1, skipped_count=0, performed_copy=True)
     )
     skipped_only = format_sync_result(
         SyncResult(
@@ -118,18 +132,52 @@ def test_format_sync_result_covers_copy_and_nothing_to_copy_cases() -> None:
                 dest_root=plan.dest_root,
                 preview_rows=plan.preview_rows,
                 copy_paths=(),
-                skipped_paths=plan.skipped_paths,
+                delete_paths=(),
+                skipped_paths=(),
                 warnings=plan.warnings,
             ),
             copied_count=0,
-            skipped_count=1,
+            deleted_count=0,
+            skipped_count=0,
             performed_copy=False,
         )
     )
 
     assert "Done. Synced 1 file(s)." in rendered
-    assert "Skipped 1 deleted file(s)." in rendered
+    assert "Deleted 1 file(s)." in rendered
     assert "Nothing to copy into /tmp/dest." in skipped_only
+
+
+def test_format_sync_result_shows_restored_count() -> None:
+    plan = _plan()
+    rendered = format_sync_result(
+        SyncResult(
+            plan=plan,
+            copied_count=1,
+            deleted_count=0,
+            skipped_count=0,
+            performed_copy=True,
+            restored_count=2,
+        )
+    )
+
+    assert "Restored 2 file(s)." in rendered
+
+
+def test_sync_json_includes_restored_count() -> None:
+    plan = _plan()
+    payload = sync_to_json(
+        SyncResult(
+            plan=plan,
+            copied_count=1,
+            deleted_count=0,
+            skipped_count=0,
+            performed_copy=True,
+            restored_count=3,
+        )
+    )
+
+    assert payload["restored_count"] == 3
 
 
 def test_format_doctor_covers_warning_and_clean_output() -> None:

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from wdsync.doctor import build_doctor_report
 from wdsync.git_dest import read_destination_state
 from wdsync.git_source import read_source_state
-from wdsync.models import ProjectConfig
+from wdsync.manifest import read_manifest, write_manifest
+from wdsync.models import ProjectConfig, StatusKind
 from wdsync.planner import build_sync_plan
 from wdsync.runner import CommandRunner
 from wdsync.sync import execute_sync
@@ -41,6 +43,28 @@ def test_untracked_directory_syncs_nested_files(
     assert (dest_repo / "newdir/sub/file.txt").read_text(encoding="utf-8") == "fresh\n"
 
 
+def test_file_with_spaces_syncs_successfully(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+    project_config_factory: Callable[[Path, Path], ProjectConfig],
+) -> None:
+    source_repo = repo_factory("source", files={"tracked.txt": "base\n"})
+    dest_repo = repo_factory("dest", clone_from=source_repo)
+    path_with_spaces = source_repo / "assets/anyone pause.wav"
+    path_with_spaces.parent.mkdir(parents=True)
+    path_with_spaces.write_text("audio placeholder\n", encoding="utf-8")
+
+    config = project_config_factory(source_repo, dest_repo)
+    source_state = read_source_state(config, git_runner)
+    plan = build_sync_plan(config, source_state)
+    result = execute_sync(plan, git_runner)
+
+    assert "assets/anyone pause.wav" in result.plan.copy_paths
+    assert (dest_repo / "assets/anyone pause.wav").read_text(encoding="utf-8") == (
+        "audio placeholder\n"
+    )
+
+
 def test_rename_and_delete_are_previewed_but_only_rename_is_synced(
     repo_factory: Callable[..., Path],
     git_runner: CommandRunner,
@@ -68,9 +92,10 @@ def test_rename_and_delete_are_previewed_but_only_rename_is_synced(
     assert labels["beta.txt"] == "renamed"
     assert labels["remove.txt"] == "deleted"
     assert "remove.txt" not in plan.copy_paths
-    assert result.skipped_count == 1
+    assert "remove.txt" in plan.delete_paths
+    assert result.deleted_count == 1
     assert (dest_repo / "beta.txt").exists()
-    assert (dest_repo / "remove.txt").exists()
+    assert not (dest_repo / "remove.txt").exists()
 
 
 def test_doctor_warns_on_head_mismatch_and_dirty_destination(
@@ -93,3 +118,95 @@ def test_doctor_warns_on_head_mismatch_and_dirty_destination(
     warning_codes = {warning.code for warning in report.warnings}
     assert "head-mismatch" in warning_codes
     assert "destination-dirty" in warning_codes
+
+
+def test_reconciliation_restores_previously_deleted_file(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+    project_config_factory: Callable[[Path, Path], ProjectConfig],
+) -> None:
+    source_repo = repo_factory(
+        "source",
+        files={"keep.txt": "keep\n", "remove.txt": "remove\n"},
+    )
+    dest_repo = repo_factory("dest", clone_from=source_repo)
+
+    # Step 1: Delete remove.txt in source and sync — should delete from dest
+    (source_repo / "remove.txt").unlink()
+
+    config = project_config_factory(source_repo, dest_repo)
+    source_state = read_source_state(config, git_runner)
+    plan = build_sync_plan(config, source_state)
+    execute_sync(plan, git_runner)
+
+    assert not (dest_repo / "remove.txt").exists()
+
+    # Step 2: Restore remove.txt in source (git restore)
+    subprocess.run(
+        ["git", "-C", str(source_repo), "restore", "--", "remove.txt"],
+        check=True,
+        capture_output=True,
+    )
+    assert (source_repo / "remove.txt").exists()
+
+    # Step 3: Sync again — should detect dest has " D" for remove.txt
+    # and restore it since source no longer has it deleted
+    source_state = read_source_state(config, git_runner)
+    destination_state = read_destination_state(dest_repo, git_runner)
+    plan = build_sync_plan(config, source_state)
+
+    source_deleted_paths = frozenset(
+        entry.path for entry in source_state.entries if entry.kind is StatusKind.DELETED
+    )
+    restore_candidates = destination_state.wt_deleted_paths - source_deleted_paths
+    if restore_candidates:
+        plan = replace(plan, restore_paths=tuple(sorted(restore_candidates)))
+
+    result = execute_sync(plan, git_runner)
+
+    assert (dest_repo / "remove.txt").exists()
+    assert (dest_repo / "remove.txt").read_text(encoding="utf-8") == "remove\n"
+    assert result.restored_count == 1
+
+
+def test_manifest_orphan_cleanup_deletes_untracked_file(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+    project_config_factory: Callable[[Path, Path], ProjectConfig],
+) -> None:
+    source_repo = repo_factory("source", files={"tracked.txt": "base\n"})
+    dest_repo = repo_factory("dest", clone_from=source_repo)
+
+    # Step 1: Create an untracked file in source and sync it
+    (source_repo / "scratch.txt").write_text("temp\n", encoding="utf-8")
+
+    config = project_config_factory(source_repo, dest_repo)
+    source_state = read_source_state(config, git_runner)
+    plan = build_sync_plan(config, source_state)
+    execute_sync(plan, git_runner)
+
+    assert (dest_repo / "scratch.txt").exists()
+
+    # Write manifest recording the untracked file we just synced
+    current_untracked = frozenset(
+        entry.path for entry in source_state.entries if entry.kind is StatusKind.NEW
+    )
+    write_manifest(config.dest_root, current_untracked)
+
+    # Step 2: Delete the untracked file from source
+    (source_repo / "scratch.txt").unlink()
+
+    # Step 3: Sync again — manifest detects orphan, deletes from dest
+    source_state = read_source_state(config, git_runner)
+    plan = build_sync_plan(config, source_state)
+
+    source_dirty_paths = frozenset(entry.path for entry in source_state.entries)
+    prev_untracked = read_manifest(config.dest_root)
+    orphaned = prev_untracked - source_dirty_paths
+    if orphaned:
+        plan = replace(plan, delete_paths=plan.delete_paths + tuple(sorted(orphaned)))
+
+    result = execute_sync(plan, git_runner)
+
+    assert not (dest_repo / "scratch.txt").exists()
+    assert result.deleted_count == 1

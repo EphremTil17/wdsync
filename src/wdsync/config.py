@@ -20,7 +20,7 @@ from wdsync.path_utils import (
 from wdsync.runner import CommandRunner
 
 CONFIG_FILENAME = ".wdsync"
-_CONFIG_LINE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
+_CONFIG_LINE = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*(.*)$")
 
 
 def find_destination_root(runner: CommandRunner, *, cwd: Path | None = None) -> Path:
@@ -42,7 +42,7 @@ def parse_config_text(text: str) -> dict[str, str]:
             continue
         key, value = match.groups()
         if key not in values:
-            values[key] = value
+            values[key] = value.strip()
     return values
 
 

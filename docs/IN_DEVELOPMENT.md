@@ -7,7 +7,7 @@ Today, `wdsync` already ships:
 - `preview`, `sync`, `init`, `doctor`, and `shell install`
 - `git.exe`-based source dirty detection
 - correct rename/copy parsing for porcelain v1 `-z`
-- deleted-file preview with delete skipping during sync
+- deletion propagation with sudo escalation and destination-modified guard
 - advisory-only `doctor` checks for HEAD mismatch and dirty destination
 
 The items below are the next layer of safety and intelligence beyond that
@@ -210,28 +210,16 @@ Why this is useful:
 
 These would also compose nicely with future checks.
 
-### 7. Delete Propagation
+### 7. Delete Propagation — SHIPPED in v0.2.0
 
-Add optional deletion support for files removed in the source repo.
+Deletion propagation is now built in. Files deleted in the source are removed
+from the destination during `wdsync sync`. Safety guards:
 
-Potential flag:
-
-```bash
-wdsync --delete
-```
-
-Why this is useful:
-
-- keeps mirrors cleaner over time
-- avoids stale files affecting tests
-- supports more faithful source-to-destination mirroring
-
-Why it should be opt-in:
-
-- deletion is inherently more dangerous than copying
-- developers may rely on destination-side scratch files or experiments
-
-This feature should never be the default.
+- files with local changes in the destination are skipped
+- path traversal attempts are blocked
+- permission errors prompt for `sudo` retry
+- absent files are silently skipped (idempotent)
+- empty parent directories are pruned automatically
 
 ### 8. Post-Sync Validation Hooks
 
@@ -354,14 +342,15 @@ wdsync --force
 
 For the best balance of value and complexity:
 
-1. HEAD mismatch warning
-2. dirty destination warning
+1. ~~HEAD mismatch warning~~ — shipped in v0.1.0
+2. ~~dirty destination warning~~ — shipped in v0.1.0
 3. scope flags (`--staged-only`, `--tracked-only`, `--new-only`)
 4. patch clean-apply check
 5. merge-base / commit relationship summary
-6. delete propagation as opt-in
-7. post-sync validation hooks
-8. JSON output
+6. ~~delete propagation~~ — shipped in v0.2.0
+7. two-way sync (`wdsync send` / `wdsync fetch`)
+8. post-sync validation hooks
+9. ~~JSON output~~ — shipped in v0.1.0
 
 ## Philosophy
 

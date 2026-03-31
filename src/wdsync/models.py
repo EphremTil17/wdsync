@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -76,8 +76,10 @@ class SyncPlan:
     dest_root: Path
     preview_rows: tuple[PreviewRow, ...]
     copy_paths: tuple[str, ...]
+    delete_paths: tuple[str, ...]
     skipped_paths: tuple[str, ...]
     warnings: tuple[str, ...]
+    restore_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,8 @@ class DestinationState:
     modified_count: int
     staged_count: int
     untracked_count: int
+    dirty_paths: frozenset[str] = field(default_factory=lambda: frozenset[str]())
+    wt_deleted_paths: frozenset[str] = field(default_factory=lambda: frozenset[str]())
 
     @property
     def is_dirty(self) -> bool:
@@ -114,8 +118,10 @@ class DoctorReport:
 class SyncResult:
     plan: SyncPlan
     copied_count: int
+    deleted_count: int
     skipped_count: int
     performed_copy: bool
+    restored_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,8 @@ class SyncJSON(TypedDict):
     dest_root: str
     total: int
     copied_count: int
+    deleted_count: int
+    restored_count: int
     skipped_count: int
     performed_copy: bool
     warnings: list[str]
