@@ -8,12 +8,12 @@ _MANIFEST_FILENAME = ".wdsync-manifest"
 _MANIFEST_VERSION = 1
 
 
-def manifest_path(dest_root: Path) -> Path:
-    return dest_root / ".git" / _MANIFEST_FILENAME
+def manifest_path(repo_root: Path) -> Path:
+    return repo_root / ".git" / _MANIFEST_FILENAME
 
 
-def read_manifest(dest_root: Path) -> frozenset[str]:
-    path = manifest_path(dest_root)
+def read_manifest(repo_root: Path) -> frozenset[str]:
+    path = manifest_path(repo_root)
     if not path.exists():
         return frozenset()
     try:
@@ -32,8 +32,8 @@ def read_manifest(dest_root: Path) -> frozenset[str]:
         return frozenset()
 
 
-def write_manifest(dest_root: Path, untracked_paths: frozenset[str]) -> None:
-    path = manifest_path(dest_root)
+def write_manifest(repo_root: Path, untracked_paths: frozenset[str]) -> None:
+    path = manifest_path(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "version": _MANIFEST_VERSION,

@@ -21,6 +21,11 @@ class StatusKind(StrEnum):
     CHANGED = "changed"
 
 
+class SyncDirection(StrEnum):
+    FETCH = "fetch"
+    SEND = "send"
+
+
 class HeadRelation(StrEnum):
     SAME = "same"
     SOURCE_AHEAD = "source-ahead"
@@ -46,6 +51,17 @@ class ProjectConfig:
     config_path: Path
     source_root: Path
     source_root_windows: str
+
+
+@dataclass(frozen=True)
+class DirectionConfig:
+    direction: SyncDirection
+    source_root: Path
+    source_root_native: str
+    source_git: str
+    dest_root: Path
+    dest_root_native: str
+    dest_git: str
 
 
 @dataclass(frozen=True)
@@ -79,6 +95,7 @@ class SyncPlan:
     delete_paths: tuple[str, ...]
     skipped_paths: tuple[str, ...]
     warnings: tuple[str, ...]
+    direction: SyncDirection = SyncDirection.FETCH
     restore_paths: tuple[str, ...] = ()
 
 
@@ -148,6 +165,7 @@ class PreviewRowJSON(TypedDict):
 
 class PreviewJSON(TypedDict):
     schema_version: int
+    direction: str
     source_root: str
     dest_root: str
     total: int
@@ -159,6 +177,7 @@ class PreviewJSON(TypedDict):
 
 class SyncJSON(TypedDict):
     schema_version: int
+    direction: str
     source_root: str
     dest_root: str
     total: int

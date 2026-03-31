@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from wdsync.models import PreviewRow, ProjectConfig, SourceState, StatusKind, SyncPlan
+from wdsync.models import DirectionConfig, PreviewRow, SourceState, StatusKind, SyncPlan
 from wdsync.status_parser import is_syncable_status
 
 
-def build_sync_plan(config: ProjectConfig, source_state: SourceState) -> SyncPlan:
+def build_sync_plan(dconfig: DirectionConfig, source_state: SourceState) -> SyncPlan:
     preview_rows: list[PreviewRow] = []
     copy_paths: list[str] = []
     delete_paths: list[str] = []
@@ -34,11 +34,12 @@ def build_sync_plan(config: ProjectConfig, source_state: SourceState) -> SyncPla
             skipped_paths.append(entry.path)
 
     return SyncPlan(
-        source_root=config.source_root,
-        dest_root=config.dest_root,
+        source_root=dconfig.source_root,
+        dest_root=dconfig.dest_root,
         preview_rows=tuple(preview_rows),
         copy_paths=tuple(copy_paths),
         delete_paths=tuple(delete_paths),
         skipped_paths=tuple(skipped_paths),
         warnings=tuple(warnings),
+        direction=dconfig.direction,
     )

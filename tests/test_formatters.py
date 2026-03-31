@@ -72,7 +72,7 @@ def test_preview_and_sync_json_include_expected_fields() -> None:
         SyncResult(plan=plan, copied_count=1, deleted_count=1, skipped_count=0, performed_copy=True)
     )
 
-    assert preview_payload["schema_version"] == 1
+    assert preview_payload["schema_version"] == 2
     assert preview_payload["rows"][0]["label"] == "unstaged"
     assert preview_payload["warnings"] == list(plan.warnings)
     assert sync_payload["copied_count"] == 1
@@ -84,7 +84,7 @@ def test_doctor_json_and_render_json_are_stable() -> None:
     rendered = render_json(payload)
     decoded = json.loads(rendered)
 
-    assert decoded["schema_version"] == 1
+    assert decoded["schema_version"] == 2
     assert decoded["warnings"][0]["severity"] == "warning"
     assert decoded["destination"]["is_dirty"] is True
 

@@ -20,9 +20,11 @@ def _write_files_from(paths: tuple[str, ...]) -> Path:
 
 
 def restore_files(
-    dest_root: Path,
     restore_paths: tuple[str, ...],
     runner: CommandRunner,
+    *,
+    dest_git: str = "git",
+    dest_root_native: str = "",
 ) -> tuple[int, list[str]]:
     if not restore_paths:
         return 0, []
@@ -31,12 +33,12 @@ def restore_files(
     restored = 0
 
     try:
-        runner.run(["git", "-C", str(dest_root), "restore", "--", *restore_paths])
+        runner.run([dest_git, "-C", dest_root_native, "restore", "--", *restore_paths])
         restored = len(restore_paths)
     except CommandExecutionError:
         for path in restore_paths:
             try:
-                runner.run(["git", "-C", str(dest_root), "restore", "--", path])
+                runner.run([dest_git, "-C", dest_root_native, "restore", "--", path])
                 restored += 1
             except CommandExecutionError:
                 warnings.append(f"warning: could not restore {path!r} in destination")
@@ -51,8 +53,15 @@ def execute_sync(
     dest_dirty_paths: frozenset[str] = frozenset(),
     confirm_sudo: Callable[[str], bool] = lambda _: False,
     prune_empty_dirs: bool = True,
+    dest_git: str = "git",
+    dest_root_native: str = "",
 ) -> SyncResult:
-    restored_count, restore_warnings = restore_files(plan.dest_root, plan.restore_paths, runner)
+    restored_count, restore_warnings = restore_files(
+        plan.restore_paths,
+        runner,
+        dest_git=dest_git,
+        dest_root_native=dest_root_native or str(plan.dest_root),
+    )
 
     outcomes = delete_files(
         plan,

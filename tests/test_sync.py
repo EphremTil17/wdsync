@@ -55,7 +55,9 @@ def test_restore_files_runs_git_restore(
     repo = repo_factory("dest", files={"file.txt": "content\n"})
     (repo / "file.txt").unlink()  # produces " D" status
 
-    restored, warnings = restore_files(repo, ("file.txt",), git_runner)
+    restored, warnings = restore_files(
+        ("file.txt",), git_runner, dest_git="git", dest_root_native=str(repo)
+    )
 
     assert restored == 1
     assert warnings == []
@@ -68,7 +70,9 @@ def test_restore_files_warns_on_failure(
 ) -> None:
     repo = repo_factory("dest", files={"file.txt": "content\n"})
 
-    restored, warnings = restore_files(repo, ("nonexistent.txt",), git_runner)
+    restored, warnings = restore_files(
+        ("nonexistent.txt",), git_runner, dest_git="git", dest_root_native=str(repo)
+    )
 
     assert restored == 0
     assert len(warnings) == 1
@@ -81,7 +85,7 @@ def test_restore_files_noop_when_empty(
 ) -> None:
     repo = repo_factory("dest", files={"file.txt": "content\n"})
 
-    restored, warnings = restore_files(repo, (), git_runner)
+    restored, warnings = restore_files((), git_runner, dest_git="git", dest_root_native=str(repo))
 
     assert restored == 0
     assert warnings == []

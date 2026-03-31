@@ -7,6 +7,7 @@ from pathlib import Path
 
 from wdsync.exceptions import SudoDeleteError
 from wdsync.models import SyncPlan
+from wdsync.path_utils import is_wsl_windows_path
 
 
 @dataclass(frozen=True)
@@ -65,11 +66,14 @@ def _unlink_with_sudo_fallback(
     abs_path: Path,
     rel_path: str,
     confirm_sudo: Callable[[str], bool],
+    dest_root: Path,
 ) -> DeletionOutcome:
     try:
         abs_path.unlink()
         return _deleted(rel_path, used_sudo=False)
     except PermissionError:
+        if is_wsl_windows_path(dest_root):
+            return _skip(rel_path, "permission-denied-windows")
         if not confirm_sudo(rel_path):
             return _skip(rel_path, "permission-denied-user-declined")
         _sudo_unlink(abs_path)
@@ -95,7 +99,7 @@ def _delete_one(
     if not abs_path.exists() and not abs_path.is_symlink():
         return _skip(rel_path, "absent")
 
-    outcome = _unlink_with_sudo_fallback(abs_path, rel_path, confirm_sudo)
+    outcome = _unlink_with_sudo_fallback(abs_path, rel_path, confirm_sudo, plan.dest_root)
     if outcome.deleted and prune_empty_dirs:
         _maybe_prune_parents(abs_path, plan.dest_root)
     return outcome

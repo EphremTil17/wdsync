@@ -1,22 +1,31 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from wdsync.models import DestinationState
+from wdsync.models import DestinationState, DirectionConfig
 from wdsync.runner import CommandRunner
 from wdsync.status_parser import parse_porcelain_v1_z
 
 
-def read_destination_head(dest_root: Path, runner: CommandRunner) -> str | None:
-    result = runner.run(["git", "-C", str(dest_root), "rev-parse", "--verify", "HEAD"], check=False)
+def read_destination_head(dconfig: DirectionConfig, runner: CommandRunner) -> str | None:
+    result = runner.run(
+        [dconfig.dest_git, "-C", dconfig.dest_root_native, "rev-parse", "--verify", "HEAD"],
+        check=False,
+    )
     if result.returncode != 0:
         return None
     return result.stdout_text().strip()
 
 
-def read_destination_state(dest_root: Path, runner: CommandRunner) -> DestinationState:
+def read_destination_state(dconfig: DirectionConfig, runner: CommandRunner) -> DestinationState:
     result = runner.run(
-        ["git", "-C", str(dest_root), "status", "--porcelain=v1", "-z", "--untracked-files=all"]
+        [
+            dconfig.dest_git,
+            "-C",
+            dconfig.dest_root_native,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+        ]
     )
     entries = parse_porcelain_v1_z(result.stdout)
 
@@ -39,7 +48,7 @@ def read_destination_state(dest_root: Path, runner: CommandRunner) -> Destinatio
             wt_deleted_paths.add(entry.path)
 
     return DestinationState(
-        head=read_destination_head(dest_root, runner),
+        head=read_destination_head(dconfig, runner),
         modified_count=modified_count,
         staged_count=staged_count,
         untracked_count=untracked_count,

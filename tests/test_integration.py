@@ -5,11 +5,12 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
+from wdsync.direction import build_direction_config
 from wdsync.doctor import build_doctor_report
 from wdsync.git_dest import read_destination_state
 from wdsync.git_source import read_source_state
 from wdsync.manifest import read_manifest, write_manifest
-from wdsync.models import ProjectConfig, StatusKind
+from wdsync.models import ProjectConfig, StatusKind, SyncDirection
 from wdsync.planner import build_sync_plan
 from wdsync.runner import CommandRunner
 from wdsync.sync import execute_sync
@@ -35,8 +36,9 @@ def test_untracked_directory_syncs_nested_files(
     (source_repo / "newdir/sub/file.txt").write_text("fresh\n", encoding="utf-8")
 
     config = project_config_factory(source_repo, dest_repo)
-    source_state = read_source_state(config, git_runner)
-    plan = build_sync_plan(config, source_state)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
     result = execute_sync(plan, git_runner)
 
     assert "newdir/sub/file.txt" in result.plan.copy_paths
@@ -55,8 +57,9 @@ def test_file_with_spaces_syncs_successfully(
     path_with_spaces.write_text("audio placeholder\n", encoding="utf-8")
 
     config = project_config_factory(source_repo, dest_repo)
-    source_state = read_source_state(config, git_runner)
-    plan = build_sync_plan(config, source_state)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
     result = execute_sync(plan, git_runner)
 
     assert "assets/anyone pause.wav" in result.plan.copy_paths
@@ -84,8 +87,9 @@ def test_rename_and_delete_are_previewed_but_only_rename_is_synced(
     (source_repo / "remove.txt").unlink()
 
     config = project_config_factory(source_repo, dest_repo)
-    source_state = read_source_state(config, git_runner)
-    plan = build_sync_plan(config, source_state)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
     result = execute_sync(plan, git_runner)
 
     labels = {row.path: row.label for row in plan.preview_rows}
@@ -111,9 +115,10 @@ def test_doctor_warns_on_head_mismatch_and_dirty_destination(
     (dest_repo / "local.txt").write_text("dirty\n", encoding="utf-8")
 
     config = project_config_factory(source_repo, dest_repo)
-    source_state = read_source_state(config, git_runner)
-    destination_state = read_destination_state(dest_repo, git_runner)
-    report = build_doctor_report(config, source_state, destination_state, git_runner)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
+    source_state = read_source_state(dconfig, git_runner)
+    destination_state = read_destination_state(dconfig, git_runner)
+    report = build_doctor_report(dconfig, source_state, destination_state, git_runner)
 
     warning_codes = {warning.code for warning in report.warnings}
     assert "head-mismatch" in warning_codes
@@ -135,8 +140,9 @@ def test_reconciliation_restores_previously_deleted_file(
     (source_repo / "remove.txt").unlink()
 
     config = project_config_factory(source_repo, dest_repo)
-    source_state = read_source_state(config, git_runner)
-    plan = build_sync_plan(config, source_state)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
     execute_sync(plan, git_runner)
 
     assert not (dest_repo / "remove.txt").exists()
@@ -151,9 +157,9 @@ def test_reconciliation_restores_previously_deleted_file(
 
     # Step 3: Sync again — should detect dest has " D" for remove.txt
     # and restore it since source no longer has it deleted
-    source_state = read_source_state(config, git_runner)
-    destination_state = read_destination_state(dest_repo, git_runner)
-    plan = build_sync_plan(config, source_state)
+    source_state = read_source_state(dconfig, git_runner)
+    destination_state = read_destination_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
 
     source_deleted_paths = frozenset(
         entry.path for entry in source_state.entries if entry.kind is StatusKind.DELETED
@@ -181,8 +187,9 @@ def test_manifest_orphan_cleanup_deletes_untracked_file(
     (source_repo / "scratch.txt").write_text("temp\n", encoding="utf-8")
 
     config = project_config_factory(source_repo, dest_repo)
-    source_state = read_source_state(config, git_runner)
-    plan = build_sync_plan(config, source_state)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
     execute_sync(plan, git_runner)
 
     assert (dest_repo / "scratch.txt").exists()
@@ -191,17 +198,17 @@ def test_manifest_orphan_cleanup_deletes_untracked_file(
     current_untracked = frozenset(
         entry.path for entry in source_state.entries if entry.kind is StatusKind.NEW
     )
-    write_manifest(config.dest_root, current_untracked)
+    write_manifest(dconfig.dest_root, current_untracked)
 
     # Step 2: Delete the untracked file from source
     (source_repo / "scratch.txt").unlink()
 
     # Step 3: Sync again — manifest detects orphan, deletes from dest
-    source_state = read_source_state(config, git_runner)
-    plan = build_sync_plan(config, source_state)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
 
     source_dirty_paths = frozenset(entry.path for entry in source_state.entries)
-    prev_untracked = read_manifest(config.dest_root)
+    prev_untracked = read_manifest(dconfig.dest_root)
     orphaned = prev_untracked - source_dirty_paths
     if orphaned:
         plan = replace(plan, delete_paths=plan.delete_paths + tuple(sorted(orphaned)))
@@ -210,3 +217,45 @@ def test_manifest_orphan_cleanup_deletes_untracked_file(
 
     assert not (dest_repo / "scratch.txt").exists()
     assert result.deleted_count == 1
+
+
+def test_send_syncs_wsl_dirty_tree_to_remote(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+    project_config_factory: Callable[[Path, Path], ProjectConfig],
+) -> None:
+    source_repo = repo_factory("source", files={"tracked.txt": "base\n"})
+    dest_repo = repo_factory("dest", clone_from=source_repo)
+
+    # Modify a file in the WSL repo (which becomes the source in send mode)
+    (dest_repo / "tracked.txt").write_text("modified in WSL\n", encoding="utf-8")
+
+    config = project_config_factory(source_repo, dest_repo)
+    dconfig = build_direction_config(config, SyncDirection.SEND)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
+    result = execute_sync(plan, git_runner)
+
+    assert result.copied_count == 1
+    assert (source_repo / "tracked.txt").read_text(encoding="utf-8") == "modified in WSL\n"
+
+
+def test_send_deletes_propagate_to_remote(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+    project_config_factory: Callable[[Path, Path], ProjectConfig],
+) -> None:
+    source_repo = repo_factory("source", files={"tracked.txt": "base\n", "remove.txt": "remove\n"})
+    dest_repo = repo_factory("dest", clone_from=source_repo)
+
+    # Delete a file in the WSL repo (source in send mode)
+    (dest_repo / "remove.txt").unlink()
+
+    config = project_config_factory(source_repo, dest_repo)
+    dconfig = build_direction_config(config, SyncDirection.SEND)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
+    result = execute_sync(plan, git_runner)
+
+    assert result.deleted_count == 1
+    assert not (source_repo / "remove.txt").exists()

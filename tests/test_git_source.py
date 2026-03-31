@@ -4,8 +4,9 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from wdsync.direction import build_direction_config
 from wdsync.git_source import read_source_head, read_source_state
-from wdsync.models import ProjectConfig
+from wdsync.models import ProjectConfig, SyncDirection
 from wdsync.runner import CommandRunner
 
 
@@ -20,8 +21,9 @@ def test_read_source_head_returns_none_without_commits(
     dest_repo = tmp_path / "dest"
     dest_repo.mkdir()
     config = project_config_factory(source_repo, dest_repo)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
 
-    assert read_source_head(config, git_runner) is None
+    assert read_source_head(dconfig, git_runner) is None
 
 
 def test_read_source_state_reads_head_and_dirty_entries(
@@ -35,7 +37,8 @@ def test_read_source_state_reads_head_and_dirty_entries(
     (source_repo / "new.txt").write_text("fresh\n", encoding="utf-8")
 
     config = project_config_factory(source_repo, dest_repo)
-    state = read_source_state(config, git_runner)
+    dconfig = build_direction_config(config, SyncDirection.FETCH)
+    state = read_source_state(dconfig, git_runner)
 
     assert state.head is not None
     assert {entry.raw_xy for entry in state.entries} == {" M", "??"}

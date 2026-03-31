@@ -4,10 +4,10 @@ from collections.abc import Sequence
 
 from wdsync.models import (
     DestinationState,
+    DirectionConfig,
     DoctorReport,
     DoctorWarning,
     HeadRelation,
-    ProjectConfig,
     RiskLevel,
     Severity,
     SourceState,
@@ -26,7 +26,7 @@ def _is_ancestor(command: Sequence[str], older: str, newer: str, runner: Command
 
 
 def determine_head_relation(
-    config: ProjectConfig,
+    dconfig: DirectionConfig,
     source_head: str | None,
     destination_head: str | None,
     runner: CommandRunner,
@@ -37,8 +37,8 @@ def determine_head_relation(
         return HeadRelation.SAME
 
     candidate_commands: tuple[tuple[str, ...], ...] = (
-        ("git", "-C", str(config.dest_root)),
-        ("git.exe", "-C", config.source_root_windows),
+        (dconfig.dest_git, "-C", dconfig.dest_root_native),
+        (dconfig.source_git, "-C", dconfig.source_root_native),
     )
     for command in candidate_commands:
         if not (
@@ -60,13 +60,13 @@ def determine_head_relation(
 
 
 def build_doctor_report(
-    config: ProjectConfig,
+    dconfig: DirectionConfig,
     source_state: SourceState,
     destination_state: DestinationState,
     runner: CommandRunner,
 ) -> DoctorReport:
     head_relation = determine_head_relation(
-        config,
+        dconfig,
         source_state.head,
         destination_state.head,
         runner,

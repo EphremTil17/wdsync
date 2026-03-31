@@ -9,12 +9,13 @@ from wdsync.models import (
     DoctorWarningJSON,
     PreviewJSON,
     PreviewRowJSON,
+    SyncDirection,
     SyncJSON,
     SyncPlan,
     SyncResult,
 )
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
 
 
 def _preview_rows_to_json(plan: SyncPlan) -> list[PreviewRowJSON]:
@@ -32,6 +33,7 @@ def _preview_rows_to_json(plan: SyncPlan) -> list[PreviewRowJSON]:
 def preview_to_json(plan: SyncPlan) -> PreviewJSON:
     return {
         "schema_version": _SCHEMA_VERSION,
+        "direction": plan.direction.value,
         "source_root": str(plan.source_root),
         "dest_root": str(plan.dest_root),
         "total": len(plan.preview_rows),
@@ -45,6 +47,7 @@ def preview_to_json(plan: SyncPlan) -> PreviewJSON:
 def sync_to_json(result: SyncResult) -> SyncJSON:
     return {
         "schema_version": _SCHEMA_VERSION,
+        "direction": result.plan.direction.value,
         "source_root": str(result.plan.source_root),
         "dest_root": str(result.plan.dest_root),
         "total": len(result.plan.preview_rows),
@@ -90,6 +93,12 @@ def render_json(payload: object) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
+def _sync_hint(direction: SyncDirection) -> str:
+    if direction is SyncDirection.SEND:
+        return "Run 'wdsync send' to sync"
+    return "Run 'wdsync fetch' or 'wdsync sync' or 'wdsync -f' to sync"
+
+
 def format_preview(plan: SyncPlan) -> str:
     if not plan.preview_rows:
         return "wdsync: nothing to sync"
@@ -106,7 +115,7 @@ def format_preview(plan: SyncPlan) -> str:
     lines.extend(
         [
             "",
-            f"  Dry run. Run 'wdsync sync' or 'wdsync -f' to sync -> {plan.dest_root}",
+            f"  Dry run. {_sync_hint(plan.direction)} -> {plan.dest_root}",
         ]
     )
     return "\n".join(lines)

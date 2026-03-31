@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from wdsync.models import ProjectConfig, SourceState
+from wdsync.models import DirectionConfig, SourceState
 from wdsync.runner import CommandRunner
 from wdsync.status_parser import parse_porcelain_v1_z
 
 
-def read_source_head(config: ProjectConfig, runner: CommandRunner) -> str | None:
+def read_source_head(dconfig: DirectionConfig, runner: CommandRunner) -> str | None:
     result = runner.run(
-        ["git.exe", "-C", config.source_root_windows, "rev-parse", "--verify", "HEAD"],
+        [dconfig.source_git, "-C", dconfig.source_root_native, "rev-parse", "--verify", "HEAD"],
         check=False,
     )
     if result.returncode != 0:
@@ -15,12 +15,12 @@ def read_source_head(config: ProjectConfig, runner: CommandRunner) -> str | None
     return result.stdout_text().strip()
 
 
-def read_source_state(config: ProjectConfig, runner: CommandRunner) -> SourceState:
+def read_source_state(dconfig: DirectionConfig, runner: CommandRunner) -> SourceState:
     status_result = runner.run(
         [
-            "git.exe",
+            dconfig.source_git,
             "-C",
-            config.source_root_windows,
+            dconfig.source_root_native,
             "status",
             "--porcelain=v1",
             "-z",
@@ -28,6 +28,6 @@ def read_source_state(config: ProjectConfig, runner: CommandRunner) -> SourceSta
         ]
     )
     return SourceState(
-        head=read_source_head(config, runner),
+        head=read_source_head(dconfig, runner),
         entries=parse_porcelain_v1_z(status_result.stdout),
     )

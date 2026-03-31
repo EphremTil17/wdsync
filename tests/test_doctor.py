@@ -9,11 +9,12 @@ import pytest
 from wdsync import doctor
 from wdsync.models import (
     DestinationState,
+    DirectionConfig,
     DoctorReport,
     HeadRelation,
-    ProjectConfig,
     RiskLevel,
     SourceState,
+    SyncDirection,
 )
 from wdsync.runner import CommandResult, CommandRunner
 
@@ -34,24 +35,28 @@ class _MergeBaseRunner:
         return CommandResult(args=("git",), returncode=self._returncode, stdout=b"", stderr=b"")
 
 
-def _project_config() -> ProjectConfig:
-    return ProjectConfig(
-        dest_root=Path("/tmp/dest"),
-        config_path=Path("/tmp/dest/.wdsync"),
+def _dconfig() -> DirectionConfig:
+    return DirectionConfig(
+        direction=SyncDirection.FETCH,
         source_root=Path("/tmp/source"),
-        source_root_windows="C:\\tmp\\source",
+        source_root_native="/tmp/source",
+        source_git="git.exe",
+        dest_root=Path("/tmp/dest"),
+        dest_root_native="/tmp/dest",
+        dest_git="git",
     )
 
 
 def test_determine_head_relation_handles_unknown_and_same_commit() -> None:
-    config = _project_config()
+    dconfig = _dconfig()
     fake_runner = cast(CommandRunner, object())
 
     assert (
-        doctor.determine_head_relation(config, None, "abc123", fake_runner) is HeadRelation.UNKNOWN
+        doctor.determine_head_relation(dconfig, None, "abc123", fake_runner) is HeadRelation.UNKNOWN
     )
     assert (
-        doctor.determine_head_relation(config, "abc123", "abc123", fake_runner) is HeadRelation.SAME
+        doctor.determine_head_relation(dconfig, "abc123", "abc123", fake_runner)
+        is HeadRelation.SAME
     )
 
 
@@ -79,7 +84,7 @@ def test_determine_head_relation_detects_destination_ahead(
     monkeypatch.setattr("wdsync.doctor._is_ancestor", is_ancestor)
 
     relation = doctor.determine_head_relation(
-        _project_config(),
+        _dconfig(),
         "source",
         "dest",
         cast(CommandRunner, object()),
@@ -112,7 +117,7 @@ def test_determine_head_relation_detects_source_ahead(
     monkeypatch.setattr("wdsync.doctor._is_ancestor", is_ancestor)
 
     relation = doctor.determine_head_relation(
-        _project_config(),
+        _dconfig(),
         "source",
         "dest",
         cast(CommandRunner, object()),
@@ -145,13 +150,13 @@ def test_determine_head_relation_detects_diverged_and_different(
     monkeypatch.setattr("wdsync.doctor._is_ancestor", is_ancestor)
 
     diverged = doctor.determine_head_relation(
-        _project_config(),
+        _dconfig(),
         "source",
         "dest",
         cast(CommandRunner, _MergeBaseRunner(returncode=0)),
     )
     different = doctor.determine_head_relation(
-        _project_config(),
+        _dconfig(),
         "source",
         "dest",
         cast(CommandRunner, _MergeBaseRunner(returncode=1)),
@@ -175,7 +180,7 @@ def test_determine_head_relation_falls_back_to_different_when_commits_are_unknow
     monkeypatch.setattr("wdsync.doctor._repo_knows_commit", repo_knows_commit)
 
     relation = doctor.determine_head_relation(
-        _project_config(),
+        _dconfig(),
         "source",
         "dest",
         cast(CommandRunner, object()),
@@ -188,18 +193,18 @@ def test_build_doctor_report_marks_clean_repos_as_low_risk(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def determine_head_relation(
-        config: ProjectConfig,
+        dconfig: DirectionConfig,
         source_head: str | None,
         destination_head: str | None,
         runner: CommandRunner,
     ) -> HeadRelation:
-        del config, source_head, destination_head, runner
+        del dconfig, source_head, destination_head, runner
         return HeadRelation.SAME
 
     monkeypatch.setattr(doctor, "determine_head_relation", determine_head_relation)
 
     report = doctor.build_doctor_report(
-        _project_config(),
+        _dconfig(),
         SourceState(head="abc123", entries=()),
         DestinationState(
             head="abc123",
@@ -220,18 +225,18 @@ def test_build_doctor_report_uses_different_message_for_unrelated_heads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def determine_head_relation(
-        config: ProjectConfig,
+        dconfig: DirectionConfig,
         source_head: str | None,
         destination_head: str | None,
         runner: CommandRunner,
     ) -> HeadRelation:
-        del config, source_head, destination_head, runner
+        del dconfig, source_head, destination_head, runner
         return HeadRelation.DIFFERENT
 
     monkeypatch.setattr(doctor, "determine_head_relation", determine_head_relation)
 
     report = doctor.build_doctor_report(
-        _project_config(),
+        _dconfig(),
         SourceState(head="source", entries=()),
         DestinationState(
             head="dest",

@@ -5,7 +5,20 @@ from collections.abc import Callable
 from pathlib import Path
 
 from wdsync.git_dest import read_destination_head, read_destination_state
+from wdsync.models import DirectionConfig, SyncDirection
 from wdsync.runner import CommandRunner
+
+
+def _dest_dconfig(repo: Path) -> DirectionConfig:
+    return DirectionConfig(
+        direction=SyncDirection.FETCH,
+        source_root=repo,
+        source_root_native=str(repo),
+        source_git="git",
+        dest_root=repo,
+        dest_root_native=str(repo),
+        dest_git="git",
+    )
 
 
 def test_read_destination_state_counts_modified_staged_and_untracked_files(
@@ -23,9 +36,10 @@ def test_read_destination_state_counts_modified_staged_and_untracked_files(
         capture_output=True,
     )
 
-    state = read_destination_state(repo, git_runner)
+    dconfig = _dest_dconfig(repo)
+    state = read_destination_state(dconfig, git_runner)
 
-    assert state.head == read_destination_head(repo, git_runner)
+    assert state.head == read_destination_head(dconfig, git_runner)
     assert state.modified_count == 1
     assert state.staged_count == 1
     assert state.untracked_count == 1
@@ -39,7 +53,7 @@ def test_wt_deleted_paths_populated(
     repo = repo_factory("dest", files={"file.txt": "content\n"})
     (repo / "file.txt").unlink()  # produces " D" status
 
-    state = read_destination_state(repo, git_runner)
+    state = read_destination_state(_dest_dconfig(repo), git_runner)
 
     assert "file.txt" in state.wt_deleted_paths
     assert "file.txt" in state.dirty_paths
@@ -56,7 +70,7 @@ def test_staged_deletion_excluded_from_wt_deleted(
         capture_output=True,
     )  # produces "D " status
 
-    state = read_destination_state(repo, git_runner)
+    state = read_destination_state(_dest_dconfig(repo), git_runner)
 
     assert "file.txt" not in state.wt_deleted_paths
     assert "file.txt" in state.dirty_paths

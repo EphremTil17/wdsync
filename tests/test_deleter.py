@@ -191,6 +191,22 @@ def test_prune_nonempty_parent_preserved(tmp_path: Path) -> None:
     assert (subdir / "other.txt").exists()
 
 
+def test_windows_path_skips_sudo(tmp_path: Path) -> None:
+    target = tmp_path / "protected.txt"
+    target.write_text("data\n", encoding="utf-8")
+
+    with (
+        patch.object(Path, "unlink", side_effect=PermissionError("denied")),
+        patch("wdsync.deleter.is_wsl_windows_path", return_value=True),
+    ):
+        outcomes = delete_files(
+            _plan(tmp_path, ("protected.txt",)), frozenset(), confirm_sudo=lambda _: True
+        )
+
+    assert outcomes[0].skipped is True
+    assert outcomes[0].skip_reason == "permission-denied-windows"
+
+
 def test_delete_no_paths_returns_empty(tmp_path: Path) -> None:
     outcomes = delete_files(_plan(tmp_path, ()), frozenset(), confirm_sudo=lambda _: False)
     assert outcomes == ()

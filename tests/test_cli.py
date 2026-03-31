@@ -12,6 +12,7 @@ from wdsync import cli
 from wdsync.exceptions import MissingConfigError, ShellDetectionError
 from wdsync.models import (
     DestinationState,
+    DirectionConfig,
     DoctorReport,
     HeadRelation,
     InitResult,
@@ -21,6 +22,7 @@ from wdsync.models import (
     ShellInstallResult,
     ShellName,
     SourceState,
+    SyncDirection,
     SyncPlan,
     SyncResult,
 )
@@ -30,20 +32,22 @@ from wdsync.runner import CommandRunner
 def _record_preview(
     calls: list[tuple[str, bool]],
     runner: CommandRunner,
+    dconfig: DirectionConfig,
     *,
     as_json: bool,
 ) -> None:
-    del runner
+    del runner, dconfig
     calls.append(("preview", as_json))
 
 
 def _record_sync(
     calls: list[tuple[str, bool]],
     runner: CommandRunner,
+    dconfig: DirectionConfig,
     *,
     as_json: bool,
 ) -> None:
-    del runner
+    del runner, dconfig
     calls.append(("sync", as_json))
 
 
@@ -51,13 +55,19 @@ def test_root_defaults_to_preview(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, bool]] = []
     fake_runner = cast(CommandRunner, object())
 
-    def preview_flow(runner: CommandRunner, *, as_json: bool) -> None:
-        _record_preview(calls, runner, as_json=as_json)
+    def preview_flow(runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool) -> None:
+        _record_preview(calls, runner, dconfig, as_json=as_json)
 
-    def sync_flow(runner: CommandRunner, *, as_json: bool) -> None:
-        _record_sync(calls, runner, as_json=as_json)
+    def sync_flow(runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool) -> None:
+        _record_sync(calls, runner, dconfig, as_json=as_json)
 
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return cast(DirectionConfig, object())
+
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "_preview_flow", preview_flow)
     monkeypatch.setattr(cli, "_sync_flow", sync_flow)
 
@@ -71,13 +81,18 @@ def test_fetch_alias_dispatches_to_sync(monkeypatch: pytest.MonkeyPatch) -> None
     calls: list[tuple[str, bool]] = []
     fake_runner = cast(CommandRunner, object())
 
-    def preview_flow(runner: CommandRunner, *, as_json: bool) -> None:
-        _record_preview(calls, runner, as_json=as_json)
+    def preview_flow(runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool) -> None:
+        _record_preview(calls, runner, dconfig, as_json=as_json)
 
-    def sync_flow(runner: CommandRunner, *, as_json: bool) -> None:
-        _record_sync(calls, runner, as_json=as_json)
+    def sync_flow(runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool) -> None:
+        _record_sync(calls, runner, dconfig, as_json=as_json)
+
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return cast(DirectionConfig, object())
 
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "_preview_flow", preview_flow)
     monkeypatch.setattr(cli, "_sync_flow", sync_flow)
 
@@ -157,16 +172,19 @@ def test_parse_shell_name_accepts_none() -> None:
 
 def test_preview_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_runner = cast(CommandRunner, object())
-    config = ProjectConfig(
-        dest_root=Path("/tmp/dest"),
-        config_path=Path("/tmp/dest/.wdsync"),
+    fake_dconfig = DirectionConfig(
+        direction=SyncDirection.FETCH,
         source_root=Path("/tmp/source"),
-        source_root_windows="C:\\tmp\\source",
+        source_root_native="/tmp/source",
+        source_git="git.exe",
+        dest_root=Path("/tmp/dest"),
+        dest_root_native="/tmp/dest",
+        dest_git="git",
     )
     source_state = SourceState(head="abc123", entries=())
     plan = SyncPlan(
-        source_root=config.source_root,
-        dest_root=config.dest_root,
+        source_root=fake_dconfig.source_root,
+        dest_root=fake_dconfig.dest_root,
         preview_rows=(
             PreviewRow(
                 path="tracked.txt",
@@ -181,16 +199,16 @@ def test_preview_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatc
         warnings=(),
     )
 
-    def load_project_config_stub(runner: CommandRunner) -> ProjectConfig:
-        del runner
-        return config
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return fake_dconfig
 
-    def read_source_state_stub(cfg: ProjectConfig, runner: CommandRunner) -> SourceState:
-        del cfg, runner
+    def read_source_state_stub(dconfig: DirectionConfig, runner: CommandRunner) -> SourceState:
+        del dconfig, runner
         return source_state
 
-    def build_sync_plan_stub(cfg: ProjectConfig, state: SourceState) -> SyncPlan:
-        del cfg, state
+    def build_sync_plan_stub(dconfig: DirectionConfig, state: SourceState) -> SyncPlan:
+        del dconfig, state
         return plan
 
     def preview_to_json_stub(built_plan: SyncPlan) -> dict[str, bool]:
@@ -202,7 +220,7 @@ def test_preview_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatc
         return "preview-json"
 
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
-    monkeypatch.setattr(cli, "load_project_config", load_project_config_stub)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "read_source_state", read_source_state_stub)
     monkeypatch.setattr(cli, "build_sync_plan", build_sync_plan_stub)
     monkeypatch.setattr(cli, "preview_to_json", preview_to_json_stub)
@@ -216,16 +234,19 @@ def test_preview_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatc
 
 def test_sync_command_uses_real_flow_with_text(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_runner = cast(CommandRunner, object())
-    config = ProjectConfig(
-        dest_root=Path("/tmp/dest"),
-        config_path=Path("/tmp/dest/.wdsync"),
+    fake_dconfig = DirectionConfig(
+        direction=SyncDirection.FETCH,
         source_root=Path("/tmp/source"),
-        source_root_windows="C:\\tmp\\source",
+        source_root_native="/tmp/source",
+        source_git="git.exe",
+        dest_root=Path("/tmp/dest"),
+        dest_root_native="/tmp/dest",
+        dest_git="git",
     )
     source_state = SourceState(head="abc123", entries=())
     plan = SyncPlan(
-        source_root=config.source_root,
-        dest_root=config.dest_root,
+        source_root=fake_dconfig.source_root,
+        dest_root=fake_dconfig.dest_root,
         preview_rows=(
             PreviewRow(
                 path="tracked.txt",
@@ -243,20 +264,22 @@ def test_sync_command_uses_real_flow_with_text(monkeypatch: pytest.MonkeyPatch) 
         plan=plan, copied_count=1, deleted_count=0, skipped_count=0, performed_copy=True
     )
 
-    def load_project_config_stub(runner: CommandRunner) -> ProjectConfig:
-        del runner
-        return config
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return fake_dconfig
 
-    def read_source_state_stub(cfg: ProjectConfig, runner: CommandRunner) -> SourceState:
-        del cfg, runner
+    def read_source_state_stub(dconfig: DirectionConfig, runner: CommandRunner) -> SourceState:
+        del dconfig, runner
         return source_state
 
-    def build_sync_plan_stub(cfg: ProjectConfig, state: SourceState) -> SyncPlan:
-        del cfg, state
+    def build_sync_plan_stub(dconfig: DirectionConfig, state: SourceState) -> SyncPlan:
+        del dconfig, state
         return plan
 
-    def read_destination_state_stub(dest_root: Path, runner: CommandRunner) -> DestinationState:
-        del dest_root, runner
+    def read_destination_state_stub(
+        dconfig: DirectionConfig, runner: CommandRunner
+    ) -> DestinationState:
+        del dconfig, runner
         return DestinationState(
             head="abc123",
             modified_count=0,
@@ -274,7 +297,7 @@ def test_sync_command_uses_real_flow_with_text(monkeypatch: pytest.MonkeyPatch) 
         return "sync-text"
 
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
-    monkeypatch.setattr(cli, "load_project_config", load_project_config_stub)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "read_source_state", read_source_state_stub)
     monkeypatch.setattr(cli, "read_destination_state", read_destination_state_stub)
     monkeypatch.setattr(cli, "build_sync_plan", build_sync_plan_stub)
@@ -289,11 +312,14 @@ def test_sync_command_uses_real_flow_with_text(monkeypatch: pytest.MonkeyPatch) 
 
 def test_doctor_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_runner = cast(CommandRunner, object())
-    config = ProjectConfig(
-        dest_root=Path("/tmp/dest"),
-        config_path=Path("/tmp/dest/.wdsync"),
+    fake_dconfig = DirectionConfig(
+        direction=SyncDirection.FETCH,
         source_root=Path("/tmp/source"),
-        source_root_windows="C:\\tmp\\source",
+        source_root_native="/tmp/source",
+        source_git="git.exe",
+        dest_root=Path("/tmp/dest"),
+        dest_root_native="/tmp/dest",
+        dest_git="git",
     )
     source_state = SourceState(head="abc123", entries=())
     destination_state = DestinationState(
@@ -313,25 +339,27 @@ def test_doctor_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatch
         risk_level=RiskLevel.LOW,
     )
 
-    def load_project_config_stub(runner: CommandRunner) -> ProjectConfig:
-        del runner
-        return config
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return fake_dconfig
 
-    def read_source_state_stub(cfg: ProjectConfig, runner: CommandRunner) -> SourceState:
-        del cfg, runner
+    def read_source_state_stub(dconfig: DirectionConfig, runner: CommandRunner) -> SourceState:
+        del dconfig, runner
         return source_state
 
-    def read_destination_state_stub(dest_root: Path, runner: CommandRunner) -> DestinationState:
-        del dest_root, runner
+    def read_destination_state_stub(
+        dconfig: DirectionConfig, runner: CommandRunner
+    ) -> DestinationState:
+        del dconfig, runner
         return destination_state
 
     def build_doctor_report_stub(
-        cfg: ProjectConfig,
+        dconfig: DirectionConfig,
         src_state: SourceState,
         dest_state: DestinationState,
         runner: CommandRunner,
     ) -> DoctorReport:
-        del cfg, src_state, dest_state, runner
+        del dconfig, src_state, dest_state, runner
         return report
 
     def doctor_to_json_stub(report_obj: DoctorReport) -> dict[str, bool]:
@@ -343,7 +371,7 @@ def test_doctor_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatch
         return "doctor-json"
 
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
-    monkeypatch.setattr(cli, "load_project_config", load_project_config_stub)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "read_source_state", read_source_state_stub)
     monkeypatch.setattr(cli, "read_destination_state", read_destination_state_stub)
     monkeypatch.setattr(cli, "build_doctor_report", build_doctor_report_stub)
@@ -359,11 +387,18 @@ def test_doctor_command_uses_real_flow_with_json(monkeypatch: pytest.MonkeyPatch
 def test_root_surfaces_user_facing_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_runner = cast(CommandRunner, object())
 
-    def preview_flow_error(runner: CommandRunner, *, as_json: bool) -> None:
-        del runner, as_json
+    def preview_flow_error(
+        runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool
+    ) -> None:
+        del runner, dconfig, as_json
         raise MissingConfigError("missing-root")
 
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return cast(DirectionConfig, object())
+
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "_preview_flow", preview_flow_error)
 
     result = CliRunner().invoke(cli.app, [])
@@ -375,11 +410,18 @@ def test_root_surfaces_user_facing_errors(monkeypatch: pytest.MonkeyPatch) -> No
 def test_preview_command_surfaces_user_facing_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_runner = cast(CommandRunner, object())
 
-    def preview_flow_error(runner: CommandRunner, *, as_json: bool) -> None:
-        del runner, as_json
+    def preview_flow_error(
+        runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool
+    ) -> None:
+        del runner, dconfig, as_json
         raise MissingConfigError("missing")
 
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return cast(DirectionConfig, object())
+
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "_preview_flow", preview_flow_error)
 
     result = CliRunner().invoke(cli.app, ["preview"])
@@ -391,11 +433,16 @@ def test_preview_command_surfaces_user_facing_errors(monkeypatch: pytest.MonkeyP
 def test_sync_command_surfaces_user_facing_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_runner = cast(CommandRunner, object())
 
-    def sync_flow_error(runner: CommandRunner, *, as_json: bool) -> None:
-        del runner, as_json
+    def sync_flow_error(runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool) -> None:
+        del runner, dconfig, as_json
         raise MissingConfigError("sync-missing")
 
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return cast(DirectionConfig, object())
+
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "_sync_flow", sync_flow_error)
 
     result = CliRunner().invoke(cli.app, ["sync"])
@@ -453,11 +500,18 @@ def test_init_command_surfaces_user_facing_errors(monkeypatch: pytest.MonkeyPatc
 def test_doctor_command_surfaces_user_facing_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_runner = cast(CommandRunner, object())
 
-    def doctor_flow_error(runner: CommandRunner, *, as_json: bool) -> None:
-        del runner, as_json
+    def doctor_flow_error(
+        runner: CommandRunner, dconfig: DirectionConfig, *, as_json: bool
+    ) -> None:
+        del runner, dconfig, as_json
         raise MissingConfigError("doctor-missing")
 
+    def build_dconfig_stub(runner: CommandRunner, direction: SyncDirection) -> DirectionConfig:
+        del runner, direction
+        return cast(DirectionConfig, object())
+
     monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+    monkeypatch.setattr(cli, "_build_dconfig", build_dconfig_stub)
     monkeypatch.setattr(cli, "_doctor_flow", doctor_flow_error)
 
     result = CliRunner().invoke(cli.app, ["doctor"])
