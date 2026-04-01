@@ -16,14 +16,14 @@ Linux Git thinks about `/mnt/c/...`.
 
 ## What It Does
 
-From inside a destination WSL repo, `wdsync` will:
+From inside a git repo, `wdsync` will:
 
-- read a local `.wdsync` file
-- resolve the Windows source repo from `SRC=/mnt/c/...`
-- query the source dirty set using `git.exe` (Windows Git)
-- preview by default to see the planned dirty set in the destination WSL repo
-- sync when you run `wdsync sync` or `wdsync -f`
-- warn with `wdsync doctor` when source and destination `HEAD` differ or the destination repo is already dirty
+- auto-detect the repo identity via remote URL or root commit SHA
+- initialize local wdsync state with `wdsync init`
+- reserve peer connection for the upcoming RPC phase via `wdsync connect`
+- fetch (pull Windows dirty tree into WSL) with `wdsync fetch`
+- send (push WSL dirty tree to Windows) with `wdsync send`
+- show a unified status of both repos with `wdsync status`
 
 > Note:
 > It includes tracked unstaged files, tracked staged files, and untracked files,
@@ -45,45 +45,33 @@ Python 3.11+, and either `uv` or `pip`; the source repo must be reachable as
 
 ```bash
 uv tool install wdsync
-```
-
-Alternative install path with `pip` after python venv:
-
-```bash
+# or Alternative install path with `pip` after python venv:
 python -m pip install wdsync
 ```
 
 ## Per-Project Config
 
-Each destination WSL repo gets a local `.wdsync` file at the repo root:
+Running `wdsync init` inside a git repo creates:
 
-```ini
-SRC=/mnt/c/Users/YourName/path/to/WindowsRepo
-```
+- A `.wdsync` marker file at the repo root (added to `.git/info/exclude`)
+- A `.git/wdsync/config.json` with the repo's identity (remote URL + root commit SHA)
 
-Example:
-
-```ini
-SRC=/mnt/c/Users/<User>/Documents/Projects/<ProjectName>
-```
-
-`wdsync init` writes this file for you and adds `.wdsync` to the destination
-repo's `.git/info/exclude` so it stays local.
+No manual path configuration needed. The identity is used to match repos
+during `wdsync connect` once peer discovery lands in the next phase.
 
 ## Quick Start
 
-From inside the destination WSL repo:
-
 ```bash
-wdsync init /mnt/c/Users/YourName/path/to/WindowsRepo
-wdsync
-wdsync sync
-```
+# On each side (WSL and Windows), inside the repo:
+wdsync init
 
-Doctor mode: Explain potential sync risks from source and destination state:
+# Reserved for the next phase:
+wdsync connect       # peer discovery / verification is not implemented yet
 
-```bash
-wdsync doctor
+# Daily use once a peer is configured:
+wdsync status        # see both repos' dirty files, conflicts, risk
+wdsync fetch         # pull from peer into local repo
+wdsync send          # push from local repo to peer
 ```
 
 If you want to contribute or work on the codebase itself, use:
@@ -98,25 +86,49 @@ Additional references:
 
 ```text
 wdsync/
-├── docs/
-├── src/ [config, doctor, preview, shell, sync, sync, runner ...]
-│   └── wdsync/
-├── scripts/
+├── docs/                        # Design documents and roadmap
+├── scripts/                     # Repo-local shell wrapper examples
 │   ├── bash/
 │   └── fish/
-└── tests/
+├── src/wdsync/                  # Published package source
+│   ├── core/                    # Foundation: models, config, runner, exceptions, logging
+│   ├── git/                     # Git state readers and porcelain parsing
+│   ├── sync/                    # Sync pipeline: planner, engine, deleter, manifest, conflicts
+│   ├── output/                  # Human-readable and JSON formatters
+│   ├── cli/                     # Typer CLI command definitions
+│   └── shell/                   # Shell completion and helper installation
+└── tests/                       # Mirrors src/ structure with unit and integration tests
 ```
+
+## Sync Rules
+
+| Scenario                                              | Behavior                                           |
+| ----------------------------------------------------- | -------------------------------------------------- |
+| File modified in source only                          | Copied to destination                              |
+| File modified in destination only                     | Not touched (destination changes are preserved)    |
+| File modified on both sides                           | **Conflict** — skipped unless `--force` is used    |
+| File deleted in source (tracked)                      | Deleted from destination                           |
+| File deleted in source (untracked, previously synced) | Deleted from destination via manifest tracking     |
+| File deleted then restored in source                  | Restored in destination via `git restore`          |
+| Deleted file has local changes in destination         | Skipped to avoid data loss                         |
+| Permission denied on deletion (WSL path)              | Prompts for `sudo` retry                           |
+| Permission denied on deletion (Windows path)          | Skipped — `sudo` has no authority over NTFS ACLs   |
+| Path traversal attempt (`../../etc/passwd`)           | Blocked                                            |
+| Empty parent directory after deletion                 | Pruned automatically                               |
+| Source staged file synced to destination              | Copied as content only — not staged in destination |
+| Untracked directory in source                         | Expanded to leaf file paths and synced             |
 
 ## Commands
 
-| Command                | JSON Output                       | Purpose                                                          |
-| ---------------------- | --------------------------------- | ---------------------------------------------------------------- |
-| `wdsync`               | Yes, with `wdsync --json`         | Preview the current source dirty set.                            |
-| `wdsync preview`       | Yes, with `wdsync preview --json` | Explicit preview mode.                                           |
-| `wdsync sync`          | Yes, with `wdsync sync --json`    | Copy the planned dirty files into the current WSL repo.          |
-| `wdsync init <SRC>`    | No                                | Create `.wdsync` for the current destination repo.               |
-| `wdsync doctor`        | Yes, with `wdsync doctor --json`  | Show advisory sync-risk checks for source and destination state. |
-| `wdsync shell install` | No                                | Install optional shell helpers and completions.                  |
+| Command                | JSON Output                       | Purpose                                                        |
+| ---------------------- | --------------------------------- | -------------------------------------------------------------- |
+| `wdsync init`          | No                                | Create `.wdsync` and `.git/wdsync/config.json` for this repo.  |
+| `wdsync connect`       | No                                | Reserved for peer discovery; currently exits as not implemented. |
+| `wdsync disconnect`    | No                                | Remove the saved peer from config.                             |
+| `wdsync fetch`         | Yes, with `wdsync fetch --json`   | Pull Windows dirty tree into WSL. Use `--force` for conflicts. |
+| `wdsync send`          | Yes, with `wdsync send --json`    | Push WSL dirty tree to Windows. Use `--force` for conflicts.   |
+| `wdsync status`        | Yes, with `wdsync status --json`  | Unified view of both repos, conflicts, and risk.               |
+| `wdsync shell install` | No                                | Install optional shell helpers and completions.                |
 
 ## Git Status Labels Passed
 
@@ -155,21 +167,20 @@ delegate to the installed CLI or fall back to `uv run`.
 
 ## Important Behavior Notes
 
-Source dirty-file detection comes from `git.exe`, not Linux Git. Preview shows
-the full source dirty set rather than a destination diff, and sync copies file
-contents only. A source staged file does not remain staged in the destination
-repo. Deleted files are propagated to the destination: if a file was deleted in
-the Windows source, `wdsync sync` removes it from the WSL repo. Files that have
-local changes in the destination are skipped to avoid destroying local work. If
-a deletion fails due to file permissions, `wdsync` will prompt to retry with
-`sudo`. Renames and copies are parsed correctly from porcelain v1 `-z` and
-untracked directories are expanded to leaf file paths.
+Each side reads its own dirty state using its native git (`git` on WSL,
+`git.exe` on Windows). File transfer uses rsync. Deletion, restoration, and
+status checks are performed locally by whichever side owns the files. Conflicts
+(files dirty on both sides) are detected and blocked by default — use `--force`
+to override. State now lives under `.git/wdsync/`, with a repo-root `.wdsync`
+marker for visibility. See the Sync Rules table above for full details.
 
 ## Limitations
 
-`wdsync` is WSL-only, supports one source path per destination repo, and
-expects the source path to live under `/mnt/<drive>/...`. It does not yet run
-patch-apply checks or support post-sync hooks.
+wdsync currently requires both repos to be accessible from the WSL filesystem
+(the Windows repo via `/mnt/<drive>/...`). Full native peer discovery and
+execution via RPC is planned for the next release; `wdsync connect` is present
+but intentionally not implemented yet. It does not yet run patch-apply checks
+or support post-sync hooks.
 
-See [IN_DEVELOPMENT.md](docs/IN_DEVELOPMENT.md) for the roadmap beyond the current
-Python CLI baseline.
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for design decisions and
+[IN_DEVELOPMENT.md](docs/IN_DEVELOPMENT.md) for the roadmap.

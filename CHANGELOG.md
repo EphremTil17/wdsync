@@ -5,6 +5,43 @@ All notable changes to `wdsync` will be documented in this file.
 The format is based on Keep a Changelog, and this project aims to follow
 Semantic Versioning once formal releases begin.
 
+## [0.4.0] - 2026-03-31
+
+### Added
+
+- Two-way sync: `wdsync send` pushes WSL dirty tree to Windows, `wdsync fetch`
+  pulls Windows dirty tree into WSL. `wdsync sync` and `-f` remain as aliases
+  for fetch.
+- Unified status command: `wdsync status` shows both repos' dirty files,
+  conflicts, HEAD relation, risk level, and orphaned untracked files in a single
+  view. Supports `--send` and `--json`.
+- Conflict detection: files modified on both sides are detected and blocked by
+  default. Use `--force` to override on `fetch`, `send`, or `sync`.
+- Structured logging via loguru: all output routed through leveled logging
+  (INFO, DEBUG, WARNING, ERROR). Console output goes to stderr so `--json`
+  stdout stays clean. File logging to `.git/.wdsync.log` with rotation.
+- `--debug` flag on root command enables verbose DEBUG-level logging.
+- Environment detection module (`core/environment.py`) for WSL/Windows/Linux.
+- RPC protocol stub (`core/protocol.py`) with versioned JSON message types and
+  hidden `wdsync rpc` command for future cross-platform communication.
+- Auto-detection for `wdsync init`: when called without arguments, scans common
+  Windows project directories for a repo with a matching git remote URL.
+- `--send` flag on `preview` and `doctor` commands for reverse direction.
+- `--force` flag on `fetch`, `send`, and `sync` commands.
+- `DirectionConfig` abstraction parameterizes the entire sync pipeline for
+  both directions without conditional branching.
+
+### Changed
+
+- Project restructured into modular subpackages: `core/`, `git/`, `sync/`,
+  `output/`, `cli/`, `shell/`. No shims or legacy re-exports — clean break.
+- `wdsync init` source argument is now optional (auto-detects if omitted).
+- JSON schema version bumped to 2 with `direction` field.
+- Deletion on Windows-mounted paths (`/mnt/c/...`) skips the sudo prompt and
+  reports `permission-denied-windows` instead.
+- `DestinationState` now carries full `entries` tuple for conflict detection.
+- Added loguru as a runtime dependency.
+
 ## [0.2.0] - 2026-03-30
 
 ### Added

@@ -5,10 +5,11 @@ build-backend = "hatchling.build"
 [project]
 # Core package/runtime contract
 name = "wdsync"
-version = "0.3.0"
+version = "0.4.0"
 description = "Mirror dirty files from a Windows Git repo into a matching WSL repo."
 requires-python = ">=3.11"
 dependencies = [
+  "loguru>=0.7.3,<1.0",
   "typer>=0.24.1,<1.0",
 ]
 
@@ -50,7 +51,7 @@ Documentation = "https://github.com/EphremTil17/wdsync#readme"
 
 # Installed CLI entry points
 [project.scripts]
-wdsync = "wdsync.cli:main"
+wdsync = "wdsync.cli.commands:main"
 
 [dependency-groups]
 dev = [

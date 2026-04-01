@@ -1,4 +1,3 @@
-from wdsync.cli import main
+from wdsync.cli.commands import main
 
-if __name__ == "__main__":
-    main()
+main()

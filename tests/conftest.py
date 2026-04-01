@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from wdsync.models import ProjectConfig
-from wdsync.runner import CommandRunner
+from wdsync.core.models import ProjectConfig
+from wdsync.core.runner import CommandRunner
 
 
 def _run(command: list[str], cwd: Path | None = None) -> None:

@@ -5,15 +5,15 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from wdsync.direction import build_direction_config
-from wdsync.doctor import build_doctor_report
-from wdsync.git_dest import read_destination_state
-from wdsync.git_source import read_source_state
-from wdsync.manifest import read_manifest, write_manifest
-from wdsync.models import ProjectConfig, StatusKind, SyncDirection
-from wdsync.planner import build_sync_plan
-from wdsync.runner import CommandRunner
-from wdsync.sync import execute_sync
+from wdsync.core.models import ProjectConfig, StatusKind, SyncDirection
+from wdsync.core.runner import CommandRunner
+from wdsync.git.dest import read_destination_state
+from wdsync.git.source import read_source_state
+from wdsync.sync.direction import build_direction_config
+from wdsync.sync.doctor import build_doctor_report
+from wdsync.sync.engine import execute_sync
+from wdsync.sync.manifest import read_manifest, write_manifest
+from wdsync.sync.planner import build_sync_plan
 
 
 def _commit_all(repo: Path, message: str) -> None:
