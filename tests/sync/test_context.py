@@ -32,13 +32,18 @@ class _FakePeerSession:
         state: DestinationState,
         *,
         compare_result: HeadRelation = HeadRelation.DIFFERENT,
+        manifest_paths: frozenset[str] = frozenset(),
     ) -> None:
         self._state = state
         self._compare_result = compare_result
+        self._manifest_paths = manifest_paths
         self.compared: list[tuple[str, str]] = []
 
     def status(self) -> DestinationState:
         return self._state
+
+    def read_manifest(self) -> frozenset[str]:
+        return self._manifest_paths
 
     def compare_heads(self, source_head: str, destination_head: str) -> HeadRelation:
         self.compared.append((source_head, destination_head))
@@ -90,7 +95,7 @@ def _send_dconfig(local_repo: Path) -> DirectionConfig:
     )
 
 
-def test_build_sync_context_uses_remote_source_and_manifest_orphans(
+def test_build_sync_context_merges_local_and_remote_manifest_orphans(
     repo_factory: Callable[..., Path],
     git_runner: CommandRunner,
     tmp_path: Path,
@@ -98,7 +103,7 @@ def test_build_sync_context_uses_remote_source_and_manifest_orphans(
     local_repo = repo_factory("dest", files={"tracked.txt": "base\n"})
     local_head = _head(local_repo)
     state_path = tmp_path / "state"
-    write_manifest(state_path, frozenset({"scratch.txt", "orphan.txt"}))
+    write_manifest(state_path, frozenset({"scratch.txt", "local-orphan.txt"}))
     peer_state = DestinationState(
         head="remote-head-not-in-local",
         modified_count=0,
@@ -110,7 +115,11 @@ def test_build_sync_context_uses_remote_source_and_manifest_orphans(
             StatusRecord(raw_xy="??", path="scratch.txt", orig_path=None, kind=StatusKind.NEW),
         ),
     )
-    peer_session = _FakePeerSession(peer_state, compare_result=HeadRelation.SOURCE_AHEAD)
+    peer_session = _FakePeerSession(
+        peer_state,
+        compare_result=HeadRelation.SOURCE_AHEAD,
+        manifest_paths=frozenset({"scratch.txt", "remote-orphan.txt"}),
+    )
 
     ctx = build_sync_context(
         _fetch_dconfig(local_repo),
@@ -121,7 +130,8 @@ def test_build_sync_context_uses_remote_source_and_manifest_orphans(
 
     assert ctx.source_state == SourceState(head=peer_state.head, entries=peer_state.entries)
     assert ctx.destination_state.head == local_head
-    assert ctx.orphaned_paths == frozenset({"orphan.txt"})
+    assert ctx.manifest_paths == frozenset({"scratch.txt", "local-orphan.txt", "remote-orphan.txt"})
+    assert ctx.orphaned_paths == frozenset({"local-orphan.txt", "remote-orphan.txt"})
     assert ctx.doctor_report.head_relation is HeadRelation.SOURCE_AHEAD
     assert peer_session.compared == [("remote-head-not-in-local", local_head)]
 

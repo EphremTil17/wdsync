@@ -4,7 +4,7 @@ This document tracks features and improvements under consideration for future
 releases. Items marked **SHIPPED** have landed; everything else is potential
 future work.
 
-## Current State (v0.5.0)
+## Current State (v0.6.0)
 
 wdsync ships a complete WSL/Windows sync workflow:
 
@@ -19,6 +19,7 @@ wdsync ships a complete WSL/Windows sync workflow:
 - Structured logging via loguru (console + file)
 - JSON output for `status`, `fetch`, and `send`
 - Runtime overrides for WSL distro and peer launch commands
+- Local teardown with `wdsync deinit`
 
 ## Shipped Features
 
@@ -35,6 +36,8 @@ wdsync ships a complete WSL/Windows sync workflow:
 | RPC peer connect | v0.5.0 | Handshake + locate_repo + configure_peer + identity match |
 | Windows-initiated connect | v0.5.0 | `wsl.exe --exec wdsync rpc` path |
 | Legacy code removal | v0.5.0 | Clean break from INI-era config |
+| Peer-native repo operations | v0.5.0 | RPC `status`, `delete`, `restore`, `compare_heads` |
+| Local deinitialization | v0.6.0 | `wdsync deinit` removes local wdsync-owned state |
 
 ## Planned Features
 

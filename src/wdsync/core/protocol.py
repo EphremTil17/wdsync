@@ -7,6 +7,7 @@ from wdsync.core.codec import (
     delete_outcomes_to_dict,
     destination_state_to_dict,
     identity_to_dict,
+    manifest_to_dict,
     restore_result_to_dict,
 )
 from wdsync.core.models import DeleteOutcome, DestinationState, Identity, RestoreResult
@@ -19,6 +20,8 @@ class RpcMethod(StrEnum):
     LOCATE_REPO = "locate_repo"
     CONFIGURE_PEER = "configure_peer"
     STATUS = "status"
+    READ_MANIFEST = "read_manifest"
+    WRITE_MANIFEST = "write_manifest"
     DELETE = "delete"
     RESTORE = "restore"
     COMPARE_HEADS = "compare_heads"
@@ -41,6 +44,8 @@ HANDSHAKE_CAPABILITIES: tuple[RpcMethod, ...] = (
     RpcMethod.LOCATE_REPO,
     RpcMethod.CONFIGURE_PEER,
     RpcMethod.STATUS,
+    RpcMethod.READ_MANIFEST,
+    RpcMethod.WRITE_MANIFEST,
     RpcMethod.DELETE,
     RpcMethod.RESTORE,
     RpcMethod.COMPARE_HEADS,
@@ -148,6 +153,47 @@ def build_status_response(state: DestinationState) -> RpcResponse:
         "version": PROTOCOL_VERSION,
         "ok": True,
         "data": destination_state_to_dict(state),
+        "error": None,
+    }
+
+
+def build_read_manifest_request(*, repo_root_native: str) -> RpcRequest:
+    return {
+        "version": PROTOCOL_VERSION,
+        "method": RpcMethod.READ_MANIFEST,
+        "args": {"repo_root_native": repo_root_native},
+    }
+
+
+def build_read_manifest_response(mirrored_paths: frozenset[str]) -> RpcResponse:
+    return {
+        "version": PROTOCOL_VERSION,
+        "ok": True,
+        "data": manifest_to_dict(mirrored_paths),
+        "error": None,
+    }
+
+
+def build_write_manifest_request(
+    *,
+    repo_root_native: str,
+    mirrored_paths: frozenset[str],
+) -> RpcRequest:
+    return {
+        "version": PROTOCOL_VERSION,
+        "method": RpcMethod.WRITE_MANIFEST,
+        "args": {
+            "repo_root_native": repo_root_native,
+            "paths": sorted(mirrored_paths),
+        },
+    }
+
+
+def build_write_manifest_response() -> RpcResponse:
+    return {
+        "version": PROTOCOL_VERSION,
+        "ok": True,
+        "data": {"saved": True},
         "error": None,
     }
 

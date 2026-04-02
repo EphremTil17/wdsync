@@ -229,6 +229,17 @@ def destination_state_from_object(raw: object, *, context: str) -> DestinationSt
     )
 
 
+def manifest_to_dict(mirrored_paths: frozenset[str]) -> dict[str, object]:
+    return {"paths": sorted(mirrored_paths)}
+
+
+def manifest_from_object(raw: object, *, context: str) -> frozenset[str]:
+    if not isinstance(raw, dict):
+        raise ConfigValidationError(f"wdsync: {context} has invalid manifest payload")
+    data = cast(dict[str, Any], raw)
+    return frozenset(_string_list_from_value(data.get("paths"), context=f"{context} paths"))
+
+
 def delete_outcomes_to_dict(outcomes: tuple[DeleteOutcome, ...]) -> dict[str, object]:
     return {
         "outcomes": [

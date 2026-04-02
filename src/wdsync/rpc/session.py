@@ -5,6 +5,7 @@ from typing import cast
 from wdsync.core.codec import (
     delete_outcomes_from_object,
     destination_state_from_object,
+    manifest_from_object,
     restore_result_from_object,
 )
 from wdsync.core.exceptions import ConfigValidationError, PeerConnectionError
@@ -22,8 +23,10 @@ from wdsync.core.protocol import (
     build_compare_heads_request,
     build_delete_request,
     build_handshake_request,
+    build_read_manifest_request,
     build_restore_request,
     build_status_request,
+    build_write_manifest_request,
 )
 from wdsync.rpc.client import RpcClient
 
@@ -65,6 +68,26 @@ class PeerSession:
             return HeadRelation(raw_relation)
         except ValueError as exc:
             raise PeerConnectionError("wdsync: peer compare_heads response is malformed") from exc
+
+    def read_manifest(self) -> frozenset[str]:
+        response = self._client.send(
+            build_read_manifest_request(repo_root_native=self._peer.root_native)
+        )
+        try:
+            return manifest_from_object(response["data"], context="RPC response")
+        except ConfigValidationError as exc:
+            raise PeerConnectionError("wdsync: peer manifest response is malformed") from exc
+
+    def write_manifest(self, mirrored_paths: frozenset[str]) -> None:
+        response = self._client.send(
+            build_write_manifest_request(
+                repo_root_native=self._peer.root_native,
+                mirrored_paths=mirrored_paths,
+            )
+        )
+        raw_saved = response["data"].get("saved")
+        if raw_saved is not True:
+            raise PeerConnectionError("wdsync: peer manifest write response is malformed")
 
     def delete(self, paths: tuple[str, ...]) -> tuple[DeleteOutcome, ...]:
         if not paths:

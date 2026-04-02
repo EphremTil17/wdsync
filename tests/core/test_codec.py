@@ -9,6 +9,8 @@ from wdsync.core.codec import (
     delete_outcomes_to_dict,
     destination_state_from_object,
     destination_state_to_dict,
+    manifest_from_object,
+    manifest_to_dict,
     protocol_identity_from_object,
     protocol_peer_from_object,
     restore_result_from_object,
@@ -142,6 +144,19 @@ def test_restore_result_roundtrip_preserves_warnings() -> None:
     loaded = restore_result_from_object(restore_result_to_dict(result), context="rpc")
 
     assert loaded == result
+
+
+def test_manifest_roundtrip_preserves_untracked_paths() -> None:
+    manifest = frozenset({"scratch.txt", "nested/new.txt"})
+
+    loaded = manifest_from_object(manifest_to_dict(manifest), context="rpc")
+
+    assert loaded == manifest
+
+
+def test_manifest_from_object_rejects_non_list_untracked() -> None:
+    with pytest.raises(ConfigValidationError, match="paths must be a list"):
+        manifest_from_object({"paths": "scratch.txt"}, context="rpc")
 
 
 def test_protocol_identity_from_object_wraps_validation_errors() -> None:

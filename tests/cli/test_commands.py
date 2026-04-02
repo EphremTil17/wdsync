@@ -9,6 +9,7 @@ import typer
 from typer.testing import CliRunner
 
 from wdsync.cli import commands as cli
+from wdsync.core.environment import Environment
 from wdsync.core.exceptions import (
     MissingConfigError,
     NotGitRepositoryError,
@@ -16,6 +17,8 @@ from wdsync.core.exceptions import (
 )
 from wdsync.core.models import (
     ConnectResult,
+    DeinitializeResult,
+    DeleteOutcome,
     DestinationState,
     DirectionConfig,
     DoctorReport,
@@ -25,6 +28,7 @@ from wdsync.core.models import (
     InitializeResult,
     PeerConfig,
     RepoEndpoint,
+    RestoreResult,
     RiskLevel,
     RuntimePreferences,
     ShellInstallResult,
@@ -34,6 +38,8 @@ from wdsync.core.models import (
     StatusRecord,
     SyncContext,
     SyncDirection,
+    SyncPlan,
+    SyncResult,
     TransferExecution,
     WdsyncConfig,
 )
@@ -326,7 +332,7 @@ def test_status_json_uses_status_formatter_payload(monkeypatch: pytest.MonkeyPat
         destination_state=destination_state,
         conflicts=(),
         doctor_report=doctor_report,
-        manifest_untracked=frozenset(),
+        manifest_paths=frozenset(),
         orphaned_paths=frozenset(),
     )
 
@@ -385,6 +391,257 @@ def test_status_json_uses_status_formatter_payload(monkeypatch: pytest.MonkeyPat
     assert '"source_entries"' in result.stdout
     assert '"destination_entries"' in result.stdout
     assert '"conflicts"' in result.stdout
+
+
+def test_sync_flow_persists_manifest_to_local_and_peer(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_runner = cast(CommandRunner, object())
+    fake_dconfig = DirectionConfig(
+        direction=SyncDirection.FETCH,
+        source=RepoEndpoint(root=Path("/tmp/peer"), native_root="/tmp/peer"),
+        destination=RepoEndpoint(root=Path("/tmp/repo"), native_root="/tmp/repo"),
+        source_git=GitExecution(command_argv=("git",), repo_native_root="/tmp/peer"),
+        destination_git=GitExecution(command_argv=("git",), repo_native_root="/tmp/repo"),
+        transfer=TransferExecution(
+            command_argv=("rsync",),
+            source_root="/tmp/peer",
+            dest_root="/tmp/repo",
+        ),
+        source_is_local=False,
+        destination_is_local=True,
+        peer_command_argv=("wdsync.exe",),
+    )
+    fake_ctx = SyncContext(
+        dconfig=fake_dconfig,
+        source_state=SourceState(
+            head="abc",
+            entries=(
+                StatusRecord(raw_xy="??", path="scratch.txt", orig_path=None, kind=StatusKind.NEW),
+            ),
+        ),
+        destination_state=DestinationState(
+            head="abc",
+            modified_count=0,
+            staged_count=0,
+            untracked_count=0,
+            entries=(),
+        ),
+        conflicts=(),
+        doctor_report=DoctorReport(
+            source_head="abc",
+            destination_head="abc",
+            source_dirty_count=1,
+            head_relation=HeadRelation.SAME,
+            destination_state=DestinationState(
+                head="abc",
+                modified_count=0,
+                staged_count=0,
+                untracked_count=0,
+                entries=(),
+            ),
+            warnings=(),
+            risk_level=RiskLevel.LOW,
+        ),
+        manifest_paths=frozenset(),
+        orphaned_paths=frozenset(),
+    )
+    observed_local: list[tuple[Path, frozenset[str]]] = []
+    observed_remote: list[frozenset[str]] = []
+    destination_after = DestinationState(
+        head="abc",
+        modified_count=0,
+        staged_count=0,
+        untracked_count=0,
+        entries=(),
+    )
+
+    class DummyPeerSession:
+        def __enter__(self) -> DummyPeerSession:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def status(self) -> DestinationState:
+            return destination_after
+
+        def write_manifest(self, mirrored_paths: frozenset[str]) -> None:
+            observed_remote.append(mirrored_paths)
+
+    def peer_session_stub(dconfig: DirectionConfig) -> DummyPeerSession:
+        del dconfig
+        return DummyPeerSession()
+
+    def build_sync_context_stub(
+        dconfig: cli.DirectionConfig,
+        runner: CommandRunner,
+        state_path: Path,
+        *,
+        peer_session: object | None = None,
+    ) -> SyncContext:
+        del dconfig, runner, state_path, peer_session
+        return fake_ctx
+
+    def execute_plan_stub(
+        plan: SyncPlan,
+        dconfig: DirectionConfig,
+        dest_dirty_paths: frozenset[str],
+        runner: CommandRunner,
+        *,
+        confirm_sudo: Callable[[str], bool],
+        peer_session: object | None,
+    ) -> SyncResult:
+        del dconfig, dest_dirty_paths, runner, confirm_sudo, peer_session
+        return SyncResult(
+            plan=plan,
+            copied_count=1,
+            deleted_count=0,
+            skipped_count=0,
+            performed_copy=True,
+        )
+
+    def write_manifest_stub(state_path: Path, untracked_paths: frozenset[str]) -> None:
+        observed_local.append((state_path, untracked_paths))
+
+    def ensure_local_rsync_available_stub(env: Environment, runner: CommandRunner) -> None:
+        del env, runner
+
+    def read_destination_state_stub(
+        dconfig: DirectionConfig,
+        runner: CommandRunner,
+    ) -> DestinationState:
+        del dconfig, runner
+        return destination_after
+
+    monkeypatch.setattr(cli, "ensure_local_rsync_available", ensure_local_rsync_available_stub)
+    monkeypatch.setattr(
+        cli,
+        "_peer_session_for",
+        peer_session_stub,  # pyright: ignore[reportPrivateUsage]
+    )
+    monkeypatch.setattr(cli, "build_sync_context", build_sync_context_stub)
+    monkeypatch.setattr(cli, "_execute_plan", execute_plan_stub)  # pyright: ignore[reportPrivateUsage]
+    monkeypatch.setattr(cli, "read_destination_state", read_destination_state_stub)
+    monkeypatch.setattr(cli, "write_manifest", write_manifest_stub)
+
+    cli._sync_flow(  # pyright: ignore[reportPrivateUsage]
+        fake_runner,
+        fake_dconfig,
+        Path("/tmp/repo/.git/wdsync"),
+        as_json=False,
+    )
+
+    expected = frozenset({"scratch.txt"})
+    assert observed_local == [(Path("/tmp/repo/.git/wdsync"), expected)]
+    assert observed_remote == [expected]
+
+
+def test_sync_flow_preserves_orphaned_manifest_paths_until_destination_is_clean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_runner = cast(CommandRunner, object())
+    fake_dconfig = DirectionConfig(
+        direction=SyncDirection.SEND,
+        source=RepoEndpoint(root=Path("/tmp/repo"), native_root="/tmp/repo"),
+        destination=RepoEndpoint(root=Path("/tmp/peer"), native_root="/tmp/peer"),
+        source_git=GitExecution(command_argv=("git",), repo_native_root="/tmp/repo"),
+        destination_git=GitExecution(command_argv=("git",), repo_native_root="/tmp/peer"),
+        transfer=TransferExecution(
+            command_argv=("rsync",),
+            source_root="/tmp/repo",
+            dest_root="/tmp/peer",
+        ),
+        source_is_local=True,
+        destination_is_local=False,
+        peer_command_argv=("wdsync.exe",),
+    )
+    dirty_destination = DestinationState(
+        head="abc",
+        modified_count=1,
+        staged_count=0,
+        untracked_count=0,
+        dirty_paths=frozenset({"README.md"}),
+        entries=(
+            StatusRecord(raw_xy=" M", path="README.md", orig_path=None, kind=StatusKind.UNSTAGED),
+        ),
+    )
+    fake_ctx = SyncContext(
+        dconfig=fake_dconfig,
+        source_state=SourceState(head="abc", entries=()),
+        destination_state=dirty_destination,
+        conflicts=(),
+        doctor_report=DoctorReport(
+            source_head="abc",
+            destination_head="abc",
+            source_dirty_count=0,
+            head_relation=HeadRelation.SAME,
+            destination_state=dirty_destination,
+            warnings=(),
+            risk_level=RiskLevel.LOW,
+        ),
+        manifest_paths=frozenset({"README.md"}),
+        orphaned_paths=frozenset({"README.md"}),
+    )
+    observed_local: list[tuple[Path, frozenset[str]]] = []
+    observed_remote: list[frozenset[str]] = []
+
+    class DummyPeerSession:
+        def __enter__(self) -> DummyPeerSession:
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            return None
+
+        def status(self) -> DestinationState:
+            return dirty_destination
+
+        def restore(self, paths: tuple[str, ...]) -> RestoreResult:
+            return RestoreResult(restored_count=0, warnings=("warning: could not restore",))
+
+        def delete(self, paths: tuple[str, ...]) -> tuple[DeleteOutcome, ...]:
+            return ()
+
+        def write_manifest(self, mirrored_paths: frozenset[str]) -> None:
+            observed_remote.append(mirrored_paths)
+
+    def build_sync_context_stub(
+        dconfig: cli.DirectionConfig,
+        runner: CommandRunner,
+        state_path: Path,
+        *,
+        peer_session: object | None = None,
+    ) -> SyncContext:
+        del dconfig, runner, state_path, peer_session
+        return fake_ctx
+
+    def write_manifest_stub(state_path: Path, mirrored_paths: frozenset[str]) -> None:
+        observed_local.append((state_path, mirrored_paths))
+
+    def ensure_local_rsync_available_stub(env: Environment, runner: CommandRunner) -> None:
+        del env, runner
+
+    def peer_session_stub(dconfig: DirectionConfig) -> DummyPeerSession:
+        del dconfig
+        return DummyPeerSession()
+
+    monkeypatch.setattr(cli, "ensure_local_rsync_available", ensure_local_rsync_available_stub)
+    monkeypatch.setattr(
+        cli,
+        "_peer_session_for",
+        peer_session_stub,  # pyright: ignore[reportPrivateUsage]
+    )
+    monkeypatch.setattr(cli, "build_sync_context", build_sync_context_stub)
+    monkeypatch.setattr(cli, "write_manifest", write_manifest_stub)
+
+    cli._sync_flow(  # pyright: ignore[reportPrivateUsage]
+        fake_runner,
+        fake_dconfig,
+        Path("/tmp/repo/.git/wdsync"),
+        as_json=False,
+    )
+
+    expected = frozenset({"README.md"})
+    assert observed_local == [(Path("/tmp/repo/.git/wdsync"), expected)]
+    assert observed_remote == [expected]
 
 
 # ---------------------------------------------------------------------------
@@ -519,3 +776,60 @@ def test_disconnect_preserves_runtime_preferences(monkeypatch: pytest.MonkeyPatc
     assert saved
     assert saved[0].peer is None
     assert saved[0].runtime == RuntimePreferences(wsl_distro="Ubuntu-24.04")
+
+
+def test_deinit_reports_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_runner = cast(CommandRunner, object())
+    fake_result = DeinitializeResult(
+        repo_root=Path("/tmp/repo"),
+        state_path=Path("/tmp/repo/.git/wdsync"),
+        marker_path=Path("/tmp/repo/.wdsync"),
+        removed_config=True,
+        removed_manifest=True,
+        removed_log=False,
+        removed_marker=True,
+        removed_exclude_entry=True,
+        removed_state_dir=True,
+    )
+
+    monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+
+    def deinitialize_repo_stub(runner: CommandRunner) -> DeinitializeResult:
+        del runner
+        return fake_result
+
+    monkeypatch.setattr(cli, "deinitialize_repo", deinitialize_repo_stub)
+
+    result = CliRunner().invoke(cli.app, ["deinit"])
+
+    assert result.exit_code == 0
+    assert "Deinitialized wdsync" in result.stderr
+
+
+def test_deinit_reports_already_deinitialized(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_runner = cast(CommandRunner, object())
+    fake_result = DeinitializeResult(
+        repo_root=Path("/tmp/repo"),
+        state_path=Path("/tmp/repo/.git/wdsync"),
+        marker_path=Path("/tmp/repo/.wdsync"),
+        removed_config=False,
+        removed_manifest=False,
+        removed_log=False,
+        removed_marker=False,
+        removed_exclude_entry=False,
+        removed_state_dir=False,
+        already_deinitialized=True,
+    )
+
+    monkeypatch.setattr(cli, "build_runner", lambda: fake_runner)
+
+    def deinitialize_repo_stub(runner: CommandRunner) -> DeinitializeResult:
+        del runner
+        return fake_result
+
+    monkeypatch.setattr(cli, "deinitialize_repo", deinitialize_repo_stub)
+
+    result = CliRunner().invoke(cli.app, ["deinit"])
+
+    assert result.exit_code == 0
+    assert "already deinitialized" in result.stderr

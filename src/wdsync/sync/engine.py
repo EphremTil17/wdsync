@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from wdsync.core.exceptions import CommandExecutionError
+from wdsync.core.interop import local_path_for_rsync_command
 from wdsync.core.models import RestoreResult, SyncPlan, SyncResult
 from wdsync.core.runner import CommandRunner
 from wdsync.sync.deleter import delete_files
@@ -59,12 +60,13 @@ def copy_files(
 
     files_from_path = _write_files_from(plan.copy_paths)
     try:
+        files_from_arg = local_path_for_rsync_command(rsync_cmd, files_from_path, runner)
         runner.run(
             [
                 *rsync_cmd,
                 "-rlt",
                 "--from0",
-                f"--files-from={files_from_path}",
+                f"--files-from={files_from_arg}",
                 f"{(rsync_source_root or str(plan.source_root))}/",
                 f"{(rsync_dest_root or str(plan.dest_root))}/",
             ]

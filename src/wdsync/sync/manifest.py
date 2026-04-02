@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 
 _MANIFEST_FILENAME = "manifest.json"
-_MANIFEST_VERSION = 1
+_MANIFEST_VERSION = 2
 
 
 def manifest_path(state_path: Path) -> Path:
@@ -21,22 +21,29 @@ def read_manifest(state_path: Path) -> frozenset[str]:
         if not isinstance(raw, dict):
             return frozenset()
         data = cast(dict[str, Any], raw)
-        if data.get("version") != _MANIFEST_VERSION:
+        version = data.get("version")
+        if version == 1:
+            items = data.get("untracked", [])
+        elif version == _MANIFEST_VERSION:
+            items = data.get("mirrored_paths", [])
+        else:
             return frozenset()
-        untracked = data.get("untracked", [])
-        if not isinstance(untracked, list):
+        if not isinstance(items, list):
             return frozenset()
-        items = cast(list[Any], untracked)
-        return frozenset(p for p in items if isinstance(p, str))
+        strings: list[str] = []
+        for item in cast(list[Any], items):
+            if isinstance(item, str):
+                strings.append(item)
+        return frozenset(strings)
     except (json.JSONDecodeError, OSError):
         return frozenset()
 
 
-def write_manifest(state_path: Path, untracked_paths: frozenset[str]) -> None:
+def write_manifest(state_path: Path, mirrored_paths: frozenset[str]) -> None:
     path = manifest_path(state_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "version": _MANIFEST_VERSION,
-        "untracked": sorted(untracked_paths),
+        "mirrored_paths": sorted(mirrored_paths),
     }
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")

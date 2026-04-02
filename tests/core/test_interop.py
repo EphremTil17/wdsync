@@ -4,10 +4,14 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from wdsync.core.environment import Environment
 from wdsync.core.exceptions import MissingDependencyError
 from wdsync.core.interop import (
+    ensure_local_rsync_available,
     git_command_for_target,
+    local_path_for_rsync_command,
     local_rsync_root,
     resolve_peer_command_for_environment,
     resolve_reverse_peer_command_for_environment,
@@ -110,6 +114,41 @@ def test_local_rsync_root_on_wsl_keeps_local_path() -> None:
     )
 
     assert translated == "/home/user/repo"
+
+
+def test_local_path_for_rsync_command_on_windows_uses_wsl_exec() -> None:
+    runner = _CaptureRunner(b"/mnt/c/Temp/files-from.txt\n")
+
+    translated = local_path_for_rsync_command(
+        ("wsl.exe", "--exec", "rsync"),
+        Path(r"C:\Temp\files-from.txt"),
+        cast(CommandRunner, runner),
+    )
+
+    assert translated == "/mnt/c/Temp/files-from.txt"
+    assert runner.calls == [
+        ("wsl.exe", "--exec", "wslpath", "-a", r"C:\Temp\files-from.txt"),
+    ]
+
+
+def test_ensure_local_rsync_available_reports_install_hint_on_wsl() -> None:
+    runner = _ResolutionRunner()
+
+    with pytest.raises(MissingDependencyError, match="Install it system-wide"):
+        ensure_local_rsync_available(Environment.WSL, cast(CommandRunner, runner))
+
+    with pytest.raises(MissingDependencyError, match="Verify with: rsync --version"):
+        ensure_local_rsync_available(Environment.WSL, cast(CommandRunner, runner))
+
+
+def test_ensure_local_rsync_available_reports_install_hint_on_windows() -> None:
+    runner = _ResolutionRunner()
+
+    with pytest.raises(MissingDependencyError, match="Install or enable WSL"):
+        ensure_local_rsync_available(Environment.WINDOWS, cast(CommandRunner, runner))
+
+    with pytest.raises(MissingDependencyError, match="wsl.exe --exec rsync --version"):
+        ensure_local_rsync_available(Environment.WINDOWS, cast(CommandRunner, runner))
 
 
 def test_resolve_peer_command_for_windows_uses_explicit_wsl_path() -> None:

@@ -189,7 +189,7 @@ def test_manifest_orphan_cleanup_deletes_untracked_file(
 
     # Write manifest recording the untracked file we just synced
     current_untracked = frozenset(
-        entry.path for entry in source_state.entries if entry.kind is StatusKind.NEW
+        entry.path for entry in source_state.entries if entry.kind is not StatusKind.DELETED
     )
     write_manifest(dconfig.dest_root, current_untracked)
 
@@ -210,6 +210,50 @@ def test_manifest_orphan_cleanup_deletes_untracked_file(
 
     assert not (dest_repo / "scratch.txt").exists()
     assert result.deleted_count == 1
+
+
+def test_manifest_reconciliation_restores_tracked_file_when_source_returns_clean(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+    direction_config_factory: Callable[..., DirectionConfig],
+) -> None:
+    source_repo = repo_factory("source", files={"tracked.txt": "base\n"})
+    dest_repo = repo_factory("dest", clone_from=source_repo)
+
+    (source_repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+
+    dconfig = direction_config_factory(source_repo, dest_repo, SyncDirection.FETCH)
+    source_state = read_source_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
+    execute_sync(plan, git_runner)
+
+    mirrored_paths = frozenset(
+        entry.path for entry in source_state.entries if entry.kind is not StatusKind.DELETED
+    )
+    write_manifest(dconfig.dest_root, mirrored_paths)
+    assert (dest_repo / "tracked.txt").read_text(encoding="utf-8") == "dirty\n"
+
+    subprocess.run(
+        ["git", "-C", str(source_repo), "restore", "--", "tracked.txt"],
+        check=True,
+        capture_output=True,
+    )
+    assert (source_repo / "tracked.txt").read_text(encoding="utf-8") == "base\n"
+
+    source_state = read_source_state(dconfig, git_runner)
+    destination_state = read_destination_state(dconfig, git_runner)
+    plan = build_sync_plan(dconfig, source_state)
+
+    source_dirty_paths = frozenset(entry.path for entry in source_state.entries)
+    orphaned = read_manifest(dconfig.dest_root) - source_dirty_paths
+    restore_candidates = destination_state.dirty_paths & orphaned
+    if restore_candidates:
+        plan = replace(plan, restore_paths=tuple(sorted(restore_candidates)))
+
+    result = execute_sync(plan, git_runner)
+
+    assert result.restored_count == 1
+    assert (dest_repo / "tracked.txt").read_text(encoding="utf-8") == "base\n"
 
 
 def test_send_syncs_wsl_dirty_tree_to_remote(

@@ -19,6 +19,22 @@ class ResolvedPeerCommand:
     stored_argv: tuple[str, ...]
 
 
+def _rsync_dependency_message(local_env: Environment) -> str:
+    if local_env is Environment.WINDOWS:
+        return (
+            "wdsync: rsync is required through WSL on Windows.\n"
+            "Install or enable WSL, then install rsync inside your WSL distro.\n"
+            "Example: sudo apt install rsync\n"
+            "Verify with: wsl.exe --exec rsync --version"
+        )
+    return (
+        "wdsync: rsync is required on this system.\n"
+        "Install it system-wide before running wdsync.\n"
+        "Example: sudo apt install rsync\n"
+        "Verify with: rsync --version"
+    )
+
+
 def _wsl_exec_command(
     *inner: str,
     distro: str | None = None,
@@ -350,13 +366,10 @@ def ensure_local_rsync_available(local_env: Environment, runner: CommandRunner) 
     command = rsync_command_for_environment(local_env)
     try:
         runner.run([*command, "--version"])
-    except MissingDependencyError:
-        raise
+    except MissingDependencyError as exc:
+        raise MissingDependencyError(_rsync_dependency_message(local_env)) from exc
     except CommandExecutionError as exc:
-        detail = command[0] if local_env is Environment.WSL else "wsl.exe --exec rsync"
-        raise MissingDependencyError(
-            f"wdsync: required program not found or unusable: {detail}"
-        ) from exc
+        raise MissingDependencyError(_rsync_dependency_message(local_env)) from exc
 
 
 def local_path_for_peer(
@@ -404,3 +417,15 @@ def local_rsync_root(
         result = runner.run([*_wsl_exec_command("wslpath", "-a", str(local_repo_root))])
         return result.stdout_text().strip()
     return str(local_repo_root)
+
+
+def local_path_for_rsync_command(
+    rsync_cmd: tuple[str, ...],
+    local_path: Path,
+    runner: CommandRunner,
+) -> str:
+    inner_command, distro = _unwrap_wsl_exec_command(rsync_cmd)
+    if inner_command != rsync_cmd and inner_command and Path(inner_command[0]).name == "rsync":
+        result = runner.run([*_wsl_exec_command("wslpath", "-a", str(local_path), distro=distro)])
+        return result.stdout_text().strip()
+    return str(local_path)

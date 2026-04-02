@@ -241,6 +241,21 @@ class InitializeResult:
 
 
 @dataclass(frozen=True)
+class DeinitializeResult:
+    repo_root: Path
+    state_path: Path
+    marker_path: Path
+    removed_config: bool
+    removed_manifest: bool
+    removed_log: bool
+    removed_marker: bool
+    removed_exclude_entry: bool
+    removed_state_dir: bool
+    already_deinitialized: bool = False
+    leftover_state_files: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class ConnectResult:
     matched_by: str
     peer: PeerConfig
@@ -275,7 +290,7 @@ class SyncContext:
     destination_state: DestinationState
     conflicts: tuple[ConflictRecord, ...]
     doctor_report: DoctorReport
-    manifest_untracked: frozenset[str]
+    manifest_paths: frozenset[str]
     orphaned_paths: frozenset[str]
 
 

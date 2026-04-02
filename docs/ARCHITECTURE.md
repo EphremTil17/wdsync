@@ -161,6 +161,7 @@ With that constraint in place, discovery proceeds as a layered search:
 | `wdsync init` | Auto-detect repo root and identity, write config |
 | `wdsync connect` | Discover peer repo and establish the two-way link from either side |
 | `wdsync disconnect` | Remove the link |
+| `wdsync deinit` | Remove local wdsync state and restore the repo to a pre-init state |
 | `wdsync fetch` | Pull from peer into local repo |
 | `wdsync send` | Push from local repo to peer |
 | `wdsync status` | Unified view: dirty files, conflicts, HEAD relation, risk |
@@ -188,7 +189,7 @@ All wdsync state lives under `.git/wdsync/` to keep the repo root clean:
 ```
 .git/wdsync/
 ├── config.json         # Identity, peer command, connection state
-├── manifest.json       # Previously synced untracked files (for orphan cleanup)
+├── manifest.json       # Pair-owned untracked mirror state (for orphan cleanup)
 └── wdsync.log          # Application log (rotated at 5MB, 3 retained)
 ```
 
@@ -203,7 +204,7 @@ note pointing to the config location.
 | Visibility | `.wdsync` at repo root | Users can see the repo is linked. Easy to discover. |
 | Implementation details | `.git/wdsync/config.json` | No `.gitignore` entry needed. Invisible to `git status`. |
 | Logs | `.git/wdsync/wdsync.log` | Same directory. One `cat` to debug. |
-| Manifest | `.git/wdsync/manifest.json` | Keeps all state co-located. |
+| Manifest | `.git/wdsync/manifest.json` | Keeps pair-owned untracked mirror state co-located. |
 
 ### Config Format
 
@@ -288,8 +289,8 @@ Rotation at 5MB with 3 retained files prevents unbounded growth.
 | File modified in source only | Copied to destination |
 | File modified in destination only | Not touched (destination changes preserved) |
 | File modified on both sides | **Conflict** — skipped unless `--force` |
-| File deleted in source (tracked) | Deleted from destination through the translated destination path |
-| File deleted in source (untracked, previously synced) | Deleted via manifest tracking |
+| File deleted in source (tracked) | Deleted from destination through peer-native delete logic |
+| File deleted in source (untracked, previously synced) | Deleted via pair-owned manifest tracking mirrored on both repos |
 | File deleted then restored in source | Restored in destination via environment-appropriate `git restore` command |
 | Deleted file has local changes in destination | Skipped to avoid data loss |
 | Permission denied on deletion | WSL destinations may prompt for `sudo`; Windows-path failures are skipped |

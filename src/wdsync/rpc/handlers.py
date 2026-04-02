@@ -12,6 +12,7 @@ from wdsync.core.config import (
     load_wdsync_config_with_paths,
     resolve_identity,
     save_wdsync_config,
+    state_dir,
 )
 from wdsync.core.environment import detect_environment
 from wdsync.core.exceptions import MissingConfigError, WdSyncError
@@ -31,8 +32,10 @@ from wdsync.core.protocol import (
     build_error_response,
     build_handshake_response,
     build_locate_repo_response,
+    build_read_manifest_response,
     build_restore_response,
     build_status_response,
+    build_write_manifest_response,
 )
 from wdsync.core.runner import CommandRunner
 from wdsync.git.dest import read_repo_destination_state
@@ -40,6 +43,7 @@ from wdsync.rpc.discovery import locate_matching_repo
 from wdsync.sync.deleter import delete_files
 from wdsync.sync.doctor import determine_head_relation_from_command
 from wdsync.sync.engine import restore_files
+from wdsync.sync.manifest import read_manifest, write_manifest
 
 
 def handle_rpc_request(request: dict[str, object], runner: CommandRunner) -> RpcResponse:
@@ -57,6 +61,10 @@ def handle_rpc_request(request: dict[str, object], runner: CommandRunner) -> Rpc
         return _handle_configure_peer(request, runner)
     if method == RpcMethod.STATUS:
         return _handle_status(request, runner)
+    if method == RpcMethod.READ_MANIFEST:
+        return _handle_read_manifest(request, runner)
+    if method == RpcMethod.WRITE_MANIFEST:
+        return _handle_write_manifest(request, runner)
     if method == RpcMethod.DELETE:
         return _handle_delete(request, runner)
     if method == RpcMethod.RESTORE:
@@ -128,6 +136,23 @@ def _handle_status(request: dict[str, object], runner: CommandRunner) -> RpcResp
         repo_root = _parse_repo_root_arg(request, method_name="status")
         state = _read_local_repo_status(repo_root, runner)
         return build_status_response(state)
+    except WdSyncError as exc:
+        return build_error_response(str(exc))
+
+
+def _handle_read_manifest(request: dict[str, object], runner: CommandRunner) -> RpcResponse:
+    try:
+        repo_root = _parse_repo_root_arg(request, method_name="read_manifest")
+        return build_read_manifest_response(read_manifest(state_dir(repo_root, runner)))
+    except WdSyncError as exc:
+        return build_error_response(str(exc))
+
+
+def _handle_write_manifest(request: dict[str, object], runner: CommandRunner) -> RpcResponse:
+    try:
+        repo_root, mirrored_paths = _parse_manifest_args(request, method_name="write_manifest")
+        write_manifest(state_dir(repo_root, runner), mirrored_paths)
+        return build_write_manifest_response()
     except WdSyncError as exc:
         return build_error_response(str(exc))
 
@@ -245,6 +270,24 @@ def _parse_repo_paths_args(
             raise WdSyncError(f"wdsync: {method_name} paths must be non-empty strings")
         paths.append(raw_path)
     return repo_root, tuple(paths)
+
+
+def _parse_manifest_args(
+    request: dict[str, object],
+    *,
+    method_name: str,
+) -> tuple[Path, frozenset[str]]:
+    repo_root = _parse_repo_root_arg(request, method_name=method_name)
+    raw_args = cast(dict[str, Any], request.get("args", {}))
+    raw_paths: object = raw_args.get("paths", [])
+    if not isinstance(raw_paths, list):
+        raise WdSyncError(f"wdsync: {method_name} requires paths")
+    paths: list[str] = []
+    for raw_path in cast(list[object], raw_paths):
+        if not isinstance(raw_path, str) or not raw_path:
+            raise WdSyncError(f"wdsync: {method_name} paths must be non-empty strings")
+        paths.append(raw_path)
+    return repo_root, frozenset(paths)
 
 
 def _parse_compare_heads_args(request: dict[str, object]) -> tuple[str, str]:

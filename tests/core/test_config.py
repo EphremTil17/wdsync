@@ -15,6 +15,7 @@ from wdsync.core.config import (
     save_wdsync_config,
     state_dir,
 )
+from wdsync.core.deinit import deinitialize_repo
 from wdsync.core.exceptions import (
     ConfigValidationError,
     MissingConfigError,
@@ -168,6 +169,62 @@ def test_initialize_repo_preserves_existing_peer_and_runtime(
         wsl_peer_command_argv=("/home/user/.local/bin/wdsync",),
         wsl_distro="Ubuntu-24.04",
     )
+
+
+def test_deinitialize_repo_removes_wdsync_state(
+    repo_factory: Callable[..., Path],
+) -> None:
+    repo = repo_factory("test", files={"a.txt": "a\n"})
+    runner = build_runner()
+
+    initialize_repo(runner, cwd=repo)
+    sdir = state_dir(repo, runner)
+    (sdir / "manifest.json").write_text("{}", encoding="utf-8")
+    (sdir / "wdsync.log").write_text("log", encoding="utf-8")
+
+    result = deinitialize_repo(runner, cwd=repo)
+    exclude_path = repo / ".git" / "info" / "exclude"
+
+    assert result.already_deinitialized is False
+    assert result.removed_config is True
+    assert result.removed_manifest is True
+    assert result.removed_log is True
+    assert result.removed_marker is True
+    assert result.removed_exclude_entry is True
+    assert result.removed_state_dir is True
+    assert not result.marker_path.exists()
+    assert not sdir.exists()
+    assert ".wdsync" not in exclude_path.read_text(encoding="utf-8")
+
+
+def test_deinitialize_repo_preserves_unknown_state_files(
+    repo_factory: Callable[..., Path],
+) -> None:
+    repo = repo_factory("test", files={"a.txt": "a\n"})
+    runner = build_runner()
+
+    initialize_repo(runner, cwd=repo)
+    sdir = state_dir(repo, runner)
+    extra = sdir / "keep.me"
+    extra.write_text("custom", encoding="utf-8")
+
+    result = deinitialize_repo(runner, cwd=repo)
+
+    assert result.removed_config is True
+    assert result.removed_state_dir is False
+    assert result.leftover_state_files == ("keep.me",)
+    assert extra.exists()
+
+
+def test_deinitialize_repo_is_idempotent(repo_factory: Callable[..., Path]) -> None:
+    repo = repo_factory("test", files={"a.txt": "a\n"})
+    runner = build_runner()
+
+    initialize_repo(runner, cwd=repo)
+    deinitialize_repo(runner, cwd=repo)
+    second = deinitialize_repo(runner, cwd=repo)
+
+    assert second.already_deinitialized is True
 
 
 def test_save_and_load_config_roundtrip(repo_factory: Callable[..., Path]) -> None:

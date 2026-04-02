@@ -75,6 +75,30 @@ def test_delete_handler_deletes_clean_paths_and_skips_edge_cases(
     assert not (repo / "remove.txt").exists()
 
 
+def test_manifest_handlers_roundtrip_real_state(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+) -> None:
+    repo = repo_factory("repo", files={"tracked.txt": "base\n"})
+
+    write_response = handle_rpc_request(
+        _request(
+            RpcMethod.WRITE_MANIFEST,
+            args={"repo_root_native": str(repo), "paths": ["scratch.txt", "nested/new.txt"]},
+        ),
+        git_runner,
+    )
+    read_response = handle_rpc_request(
+        _request(RpcMethod.READ_MANIFEST, args={"repo_root_native": str(repo)}),
+        git_runner,
+    )
+
+    assert write_response["ok"] is True
+    assert write_response["data"]["saved"] is True
+    assert read_response["ok"] is True
+    assert set(read_response["data"]["paths"]) == {"scratch.txt", "nested/new.txt"}  # type: ignore[index]
+
+
 def test_restore_handler_restores_deleted_file_in_real_repo(
     repo_factory: Callable[..., Path],
     git_runner: CommandRunner,
@@ -178,6 +202,13 @@ def test_handlers_reject_malformed_rpc_arguments(
         _request(RpcMethod.COMPARE_HEADS, args={"repo_root_native": str(repo), "source_head": ""}),
         git_runner,
     )
+    manifest_response = handle_rpc_request(
+        _request(
+            RpcMethod.WRITE_MANIFEST,
+            args={"repo_root_native": str(repo), "paths": "bad"},
+        ),
+        git_runner,
+    )
 
     assert status_response["ok"] is False
     assert "repo_root_native" in (status_response["error"] or "")
@@ -185,3 +216,5 @@ def test_handlers_reject_malformed_rpc_arguments(
     assert "paths must be non-empty strings" in (delete_response["error"] or "")
     assert compare_response["ok"] is False
     assert "source_head" in (compare_response["error"] or "")
+    assert manifest_response["ok"] is False
+    assert "requires paths" in (manifest_response["error"] or "")

@@ -48,6 +48,53 @@ def test_execute_sync_uses_content_focused_rsync_flags(tmp_path: Path) -> None:
     assert any(arg.startswith("--files-from=") for arg in args)
 
 
+def test_copy_files_translates_files_from_path_for_wsl_rsync(tmp_path: Path) -> None:
+    log_path = tmp_path / "rsync-args.txt"
+    wsl_stub = _write_executable(
+        tmp_path / "wsl.exe",
+        (
+            "#!/usr/bin/env bash\n"
+            'if [[ "$1" == "--exec" && "$2" == "wslpath" && "$3" == "-a" ]]; then\n'
+            "  printf '/mnt/c/Temp/files-from.txt\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            'if [[ "$1" == "--exec" && "$2" == "rsync" ]]; then\n'
+            "  shift 2\n"
+            f"  printf '%s\\n' \"$@\" > {log_path}\n"
+            "  exit 0\n"
+            "fi\n"
+            "exit 1\n"
+        ),
+    )
+    runner = CommandRunner({"wsl.exe": wsl_stub})
+    source_root = tmp_path / "source"
+    dest_root = tmp_path / "dest"
+    source_root.mkdir()
+    dest_root.mkdir()
+
+    plan = SyncPlan(
+        source_root=source_root,
+        dest_root=dest_root,
+        preview_rows=(),
+        copy_paths=("lemons.md",),
+        delete_paths=(),
+        skipped_paths=(),
+        warnings=(),
+    )
+
+    execute_sync(
+        plan,
+        runner,
+        rsync_cmd=("wsl.exe", "--exec", "rsync"),
+        rsync_source_root="/mnt/c/Users/user/repo",
+        rsync_dest_root="/home/user/repo",
+    )
+
+    args = log_path.read_text(encoding="utf-8").splitlines()
+    assert "--from0" in args
+    assert "--files-from=/mnt/c/Temp/files-from.txt" in args
+
+
 def test_restore_files_runs_git_restore(
     repo_factory: Callable[..., Path],
     git_runner: CommandRunner,

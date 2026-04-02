@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
+
+import pytest
 
 from wdsync.core.models import (
     ConflictRecord,
@@ -21,6 +24,12 @@ from wdsync.output.formatters import (
     status_to_json,
     sync_to_json,
 )
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(value: str) -> str:
+    return _ANSI_RE.sub("", value)
 
 
 def _plan() -> SyncPlan:
@@ -145,6 +154,40 @@ def test_format_status_shows_unified_view() -> None:
     assert "file.py" in rendered
     assert "Conflicts: none" in rendered
     assert "HEAD relation:       same" in rendered
+
+
+def test_format_status_colorizes_sections_for_interactive_terminals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SourceState(
+        head="abc",
+        entries=(
+            StatusRecord(raw_xy=" M", path="file.py", orig_path=None, kind=StatusKind.UNSTAGED),
+        ),
+    )
+    dest = DestinationState(
+        head="abc",
+        modified_count=0,
+        staged_count=0,
+        untracked_count=0,
+    )
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    rendered = format_status(
+        direction=SyncDirection.FETCH,
+        source_state=source,
+        destination_state=dest,
+        conflicts=(),
+        head_relation="same",
+        risk_level="low",
+        orphaned_count=0,
+    )
+
+    assert "\x1b[" in rendered
+    assert _strip_ansi(rendered).count("Source: 1 dirty file(s)") == 1
+    assert _strip_ansi(rendered).count("Destination: clean") == 1
+    assert _strip_ansi(rendered).count("Conflicts: none") == 1
 
 
 def test_status_to_json_matches_declared_schema() -> None:

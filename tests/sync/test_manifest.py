@@ -39,6 +39,13 @@ def test_read_manifest_handles_wrong_version(tmp_path: Path) -> None:
     assert read_manifest(tmp_path) == frozenset()
 
 
+def test_read_manifest_supports_legacy_untracked_schema(tmp_path: Path) -> None:
+    data = {"version": 1, "untracked": ["a.txt"]}
+    (tmp_path / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+
+    assert read_manifest(tmp_path) == frozenset({"a.txt"})
+
+
 def test_write_manifest_creates_parent_if_needed(tmp_path: Path) -> None:
     state = tmp_path / "wdsync"
     write_manifest(state, frozenset({"x.txt"}))

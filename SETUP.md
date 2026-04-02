@@ -23,6 +23,12 @@ You also need:
 - a Windows source repo reachable as `/mnt/<drive>/...`
 - wdsync installed on both sides (WSL and Windows) for peer connect to work
 
+`wdsync` does not bundle or install `rsync`. Make sure it is already available:
+
+- WSL/Linux: `sudo apt install rsync`
+- Windows flow: install `rsync` inside the WSL distro used by `wdsync`, then
+  verify with `wsl.exe --exec rsync --version`
+
 ## 1. Install The CLI
 
 Recommended install path:
@@ -156,6 +162,17 @@ wdsync disconnect
 ```
 
 You can reconnect later with `wdsync connect`.
+
+To remove local wdsync state entirely:
+
+```bash
+wdsync deinit
+```
+
+This removes local wdsync-owned state such as `.wdsync`,
+`.git/wdsync/config.json`, `manifest.json`, `wdsync.log`, and the `.wdsync`
+entry in `.git/info/exclude`. It is local-only; it does not deinitialize the
+peer repo automatically.
 
 ## Notes
 

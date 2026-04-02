@@ -23,6 +23,8 @@ From inside a git repo, `wdsync` will:
 - initialize local wdsync state with `wdsync init`
 - discover and link the peer repo via RPC with `wdsync connect`
 - establish the connection on both repos from a single `connect` call
+- remove only the saved peer link with `wdsync disconnect`
+- remove local wdsync state entirely with `wdsync deinit`
 - fetch (pull from peer into the local repo) with `wdsync fetch`
 - send (push from the local repo to the peer) with `wdsync send`
 - show a unified status of both repos with `wdsync status`
@@ -40,6 +42,12 @@ From inside a git repo, `wdsync` will:
 Get `git` available in WSL and Windows (`git.exe`), plus `rsync`, `wslpath`,
 Python 3.11+, and either `uv` or `pip`; the source repo must be reachable as
 `/mnt/<drive>/...`.
+
+`wdsync` does not install `rsync` for you. It must already be available:
+
+- WSL/Linux: install it system-wide, for example `sudo apt install rsync`
+- Windows: `wdsync` uses `wsl.exe --exec rsync`, so install `rsync` inside the
+  target WSL distro and verify with `wsl.exe --exec rsync --version`
 
 ## Install
 
@@ -112,7 +120,7 @@ wdsync/
 | File modified in destination only                     | Not touched (destination changes are preserved)    |
 | File modified on both sides                           | **Conflict** — skipped unless `--force` is used    |
 | File deleted in source (tracked)                      | Deleted from destination                           |
-| File deleted in source (untracked, previously synced) | Deleted from destination via manifest tracking     |
+| File deleted in source (untracked, previously synced) | Deleted from destination via pair-owned manifest tracking |
 | File deleted then restored in source                  | Restored in destination via `git restore`          |
 | Deleted file has local changes in destination         | Skipped to avoid data loss                         |
 | Permission denied on deletion (WSL path)              | Prompts for `sudo` retry                           |
@@ -129,6 +137,7 @@ wdsync/
 | `wdsync init`          | No                               | Create `.wdsync` and `.git/wdsync/config.json` for this repo.            |
 | `wdsync connect`       | No                               | Discover peer via RPC, verify identity, and save the link on both repos. |
 | `wdsync disconnect`    | No                               | Remove the saved peer from config.                                       |
+| `wdsync deinit`        | No                               | Remove local wdsync state and restore the repo to a pre-init state.      |
 | `wdsync fetch`         | Yes, with `wdsync fetch --json`  | Pull peer dirty tree into the local repo. Use `--force` for conflicts.   |
 | `wdsync send`          | Yes, with `wdsync send --json`   | Push local dirty tree to the peer. Use `--force` for conflicts.          |
 | `wdsync status`        | Yes, with `wdsync status --json` | Unified view of both repos, conflicts, and risk.                         |
@@ -174,22 +183,23 @@ delegate to the installed CLI or fall back to `uv run`.
 Each side reads its own dirty state using its native git (`git` on WSL,
 `git.exe` on Windows). `connect` is bilateral: one successful `wdsync connect`
 stores peer configuration on both repos, and either repo can then run
-`status`, `fetch`, or `send`. File transfer uses rsync over translated peer
+`status`, `fetch`, or `send`. Repo inspection and peer-side delete/restore run
+natively through RPC, while file transfer still uses rsync over translated peer
 paths. Conflicts (files dirty on both sides) are detected and blocked by
 default — use `--force` to override. State lives under `.git/wdsync/`, with a
-repo-root `.wdsync` marker for visibility. See the Sync Rules table above for
-full details.
+repo-root `.wdsync` marker for visibility. `disconnect` removes only the peer
+link; `deinit` removes local wdsync state entirely. See the Sync Rules table
+above for full details.
 
 ## Limitations
 
 wdsync currently depends on WSL/Windows path interop: Windows repos must be
 reachable from WSL as `/mnt/<drive>/...`, and WSL repos must be reachable from
 Windows through `\\wsl.localhost\...` path translation. `connect` can be
-initiated from either side, but the current release still performs file
-transfer and file mutation through translated paths rather than peer-side
-status/delete/restore RPC dispatch. wdsync does not support empty repos (at
-least one commit is required for identity resolution). It does not yet run
-patch-apply checks or support post-sync hooks.
+initiated from either side. File transfer still depends on translated paths via
+rsync, but repo inspection and peer-side delete/restore are RPC-native. wdsync
+does not support empty repos (at least one commit is required for identity
+resolution). It does not yet run patch-apply checks or support post-sync hooks.
 
 See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for design decisions and
 [IN_DEVELOPMENT.md](docs/IN_DEVELOPMENT.md) for the roadmap.

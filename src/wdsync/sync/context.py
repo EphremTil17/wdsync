@@ -30,9 +30,11 @@ def build_sync_context(
         runner,
         peer_compare_heads=peer_session.compare_heads if peer_session is not None else None,
     )
-    manifest_untracked = read_manifest(state_path)
+    manifest_paths = read_manifest(state_path)
+    if peer_session is not None:
+        manifest_paths = manifest_paths | peer_session.read_manifest()
     source_dirty_paths = frozenset(entry.path for entry in source_state.entries)
-    orphaned_paths = manifest_untracked - source_dirty_paths
+    orphaned_paths = manifest_paths - source_dirty_paths
 
     return SyncContext(
         dconfig=dconfig,
@@ -40,7 +42,7 @@ def build_sync_context(
         destination_state=destination_state,
         conflicts=conflicts,
         doctor_report=doctor_report,
-        manifest_untracked=manifest_untracked,
+        manifest_paths=manifest_paths,
         orphaned_paths=orphaned_paths,
     )
 

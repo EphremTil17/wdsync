@@ -15,18 +15,21 @@ from wdsync.core.config import (
     load_wdsync_config_with_paths,
     save_wdsync_config,
 )
+from wdsync.core.deinit import deinitialize_repo
 from wdsync.core.environment import detect_environment
 from wdsync.core.exceptions import WdSyncError
 from wdsync.core.interop import ensure_local_rsync_available
 from wdsync.core.logging import attach_file_logging, configure_logging, log
 from wdsync.core.models import (
     DeleteOutcome,
+    DestinationState,
     DirectionConfig,
     PeerConfig,
     RestoreResult,
     RuntimePreferences,
     ShellName,
     StatusKind,
+    SyncContext,
     SyncDirection,
     SyncPlan,
     SyncResult,
@@ -34,6 +37,7 @@ from wdsync.core.models import (
 )
 from wdsync.core.protocol import build_error_response
 from wdsync.core.runner import CommandRunner, build_runner
+from wdsync.git.dest import read_destination_state
 from wdsync.output.formatters import (
     format_status,
     format_sync_result,
@@ -166,11 +170,21 @@ def _sync_flow(
             entry.path for entry in ctx.source_state.entries if entry.kind is StatusKind.DELETED
         )
         restore_candidates = ctx.destination_state.wt_deleted_paths - source_deleted_paths
+        restore_candidates = restore_candidates | (
+            ctx.destination_state.dirty_paths & ctx.orphaned_paths
+        )
         if restore_candidates:
             plan = replace(plan, restore_paths=tuple(sorted(restore_candidates)))
 
-        if ctx.orphaned_paths:
-            plan = replace(plan, delete_paths=plan.delete_paths + tuple(sorted(ctx.orphaned_paths)))
+        orphaned_untracked = tuple(
+            sorted(
+                entry.path
+                for entry in ctx.destination_state.entries
+                if entry.kind is StatusKind.NEW and entry.path in ctx.orphaned_paths
+            )
+        )
+        if orphaned_untracked:
+            plan = replace(plan, delete_paths=plan.delete_paths + orphaned_untracked)
 
         def _confirm_sudo(rel_path: str) -> bool:
             return typer.confirm(
@@ -187,10 +201,13 @@ def _sync_flow(
             peer_session=peer_session,
         )
 
-        current_untracked = frozenset(
-            entry.path for entry in ctx.source_state.entries if entry.kind is StatusKind.NEW
+        next_manifest_paths = _next_manifest_paths(
+            ctx,
+            dconfig,
+            runner,
+            peer_session=peer_session,
         )
-        write_manifest(sdir, current_untracked)
+        _persist_manifest_state(sdir, next_manifest_paths, peer_session)
 
         if as_json:
             typer.echo(render_json(sync_to_json(result)))
@@ -265,6 +282,46 @@ def _merge_remote_warnings(
     if not extra_warnings:
         return plan
     return replace(plan, warnings=tuple(extra_warnings))
+
+
+def _persist_manifest_state(
+    sdir: Path,
+    current_mirrored_paths: frozenset[str],
+    peer_session: PeerSession | None,
+) -> None:
+    write_manifest(sdir, current_mirrored_paths)
+    if peer_session is not None:
+        peer_session.write_manifest(current_mirrored_paths)
+
+
+def _next_manifest_paths(
+    ctx: SyncContext,
+    dconfig: DirectionConfig,
+    runner: CommandRunner,
+    *,
+    peer_session: PeerSession | None,
+) -> frozenset[str]:
+    current_source_paths = frozenset(
+        entry.path for entry in ctx.source_state.entries if entry.kind is not StatusKind.DELETED
+    )
+    destination_after = _destination_state_after_sync(dconfig, runner, peer_session=peer_session)
+    unresolved_orphans = ctx.orphaned_paths & frozenset(
+        entry.path for entry in destination_after.entries
+    )
+    return current_source_paths | unresolved_orphans
+
+
+def _destination_state_after_sync(
+    dconfig: DirectionConfig,
+    runner: CommandRunner,
+    *,
+    peer_session: PeerSession | None,
+) -> DestinationState:
+    if dconfig.destination_is_local:
+        return read_destination_state(dconfig, runner)
+    if peer_session is None:
+        raise WdSyncError("wdsync: peer session is required for remote destination sync")
+    return peer_session.status()
 
 
 def _peer_config_for_direction(dconfig: DirectionConfig) -> PeerConfig:
@@ -477,6 +534,46 @@ def disconnect() -> None:
         log.info("Disconnected from peer.")
     except WdSyncError as error:
         _exit_with_error(error)
+
+
+@app.command()
+def deinit() -> None:
+    """Remove local wdsync state and restore the repo to a pre-init state."""
+    runner = build_runner()
+    try:
+        result = deinitialize_repo(runner)
+    except WdSyncError as error:
+        _exit_with_error(error)
+
+    if result.already_deinitialized:
+        log.info(f"wdsync already deinitialized in {result.repo_root}")
+        return
+
+    removed_items: list[str] = []
+    if result.removed_config:
+        removed_items.append(str(result.state_path / "config.json"))
+    if result.removed_manifest:
+        removed_items.append(str(result.state_path / "manifest.json"))
+    if result.removed_log:
+        removed_items.append(str(result.state_path / "wdsync.log"))
+    if result.removed_marker:
+        removed_items.append(str(result.marker_path))
+    if result.removed_exclude_entry:
+        removed_items.append(".wdsync entry from .git/info/exclude")
+    if result.removed_state_dir:
+        removed_items.append(str(result.state_path))
+
+    lines = [f"Deinitialized wdsync in {result.repo_root}"]
+    if removed_items:
+        lines.append("  removed:")
+        for item in removed_items:
+            lines.append(f"    {item}")
+    if result.leftover_state_files:
+        lines.append(
+            "  kept state dir because it contains unknown files: "
+            + ", ".join(result.leftover_state_files)
+        )
+    log.info("\n".join(lines))
 
 
 @shell_app.command("install")

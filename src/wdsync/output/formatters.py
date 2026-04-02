@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 
 from wdsync.core.models import (
     ConflictRecord,
@@ -16,6 +18,11 @@ from wdsync.core.models import (
 from wdsync.git.status_parser import is_syncable_status
 
 _SCHEMA_VERSION = 2
+_ANSI_RESET = "\x1b[0m"
+_ANSI_CYAN = "\x1b[36m"
+_ANSI_GREEN = "\x1b[32m"
+_ANSI_YELLOW = "\x1b[33m"
+_ANSI_DIM = "\x1b[2m"
 
 
 def _preview_rows_to_json(plan: SyncPlan) -> list[PreviewRowJSON]:
@@ -95,6 +102,24 @@ def render_json(payload: object) -> str:
     return json.dumps(payload, indent=2, sort_keys=True)
 
 
+def _colors_enabled() -> bool:
+    if os.getenv("NO_COLOR"):
+        return False
+    if os.getenv("FORCE_COLOR"):
+        return True
+    return sys.stderr.isatty()
+
+
+def _colorize(text: str, ansi: str) -> str:
+    if not _colors_enabled():
+        return text
+    return f"{ansi}{text}{_ANSI_RESET}"
+
+
+def _dim(text: str) -> str:
+    return _colorize(text, _ANSI_DIM)
+
+
 def _sync_hint(direction: SyncDirection) -> str:
     if direction is SyncDirection.SEND:
         return "Run 'wdsync send' to sync"
@@ -148,41 +173,46 @@ def format_status(
     lines = [f"wdsync status: {dir_label}", ""]
 
     if source_state.entries:
-        lines.append(f"  Source: {len(source_state.entries)} dirty file(s)")
+        lines.append(_colorize(f"  Source: {len(source_state.entries)} dirty file(s)", _ANSI_CYAN))
         for entry in source_state.entries:
             lines.append(f"    [{entry.kind.value:<9}] [{entry.raw_xy}]  {entry.path}")
     else:
-        lines.append("  Source: clean")
+        lines.append(_colorize("  Source: clean", _ANSI_CYAN))
 
     lines.append("")
     dest_entry_count = len(destination_state.entries)
     if dest_entry_count:
-        lines.append(f"  Destination: {dest_entry_count} dirty file(s)")
+        lines.append(_colorize(f"  Destination: {dest_entry_count} dirty file(s)", _ANSI_GREEN))
         for entry in destination_state.entries:
             lines.append(f"    [{entry.kind.value:<9}] [{entry.raw_xy}]  {entry.path}")
     else:
-        lines.append("  Destination: clean")
+        lines.append(_colorize("  Destination: clean", _ANSI_GREEN))
 
     lines.append("")
     if conflicts:
-        lines.append(f"  Conflicts: {len(conflicts)} file(s) modified on both sides")
+        lines.append(
+            _colorize(
+                f"  Conflicts: {len(conflicts)} file(s) modified on both sides",
+                _ANSI_YELLOW,
+            )
+        )
         for c in conflicts:
             lines.append(f"    {c.path}  (source: {c.source_xy}, dest: {c.dest_xy})")
     else:
-        lines.append("  Conflicts: none")
+        lines.append(_colorize("  Conflicts: none", _ANSI_YELLOW))
 
     lines.extend(
         [
             "",
-            f"  HEAD relation:       {head_relation}",
-            f"  Risk level:          {risk_level}",
-            f"  Orphaned untracked:  {orphaned_count}",
+            _dim(f"  HEAD relation:       {head_relation}"),
+            _dim(f"  Risk level:          {risk_level}"),
+            _dim(f"  Orphaned mirrored:   {orphaned_count}"),
             "",
         ]
     )
 
     if conflicts:
-        lines.append("  Conflicts will be skipped unless --force is used.")
+        lines.append(_colorize("  Conflicts will be skipped unless --force is used.", _ANSI_YELLOW))
     hint = _sync_hint(direction)
     lines.append(f"  {hint}")
     return "\n".join(lines)

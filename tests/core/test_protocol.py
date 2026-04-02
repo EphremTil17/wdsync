@@ -14,10 +14,14 @@ from wdsync.core.protocol import (
     build_handshake_response,
     build_locate_repo_request,
     build_locate_repo_response,
+    build_read_manifest_request,
+    build_read_manifest_response,
     build_restore_request,
     build_restore_response,
     build_status_request,
     build_status_response,
+    build_write_manifest_request,
+    build_write_manifest_response,
 )
 
 
@@ -96,11 +100,20 @@ def test_build_configure_peer_request_and_response() -> None:
 
 def test_build_status_delete_and_restore_requests() -> None:
     status_req = build_status_request(repo_root_native="/repo")
+    read_manifest_req = build_read_manifest_request(repo_root_native="/repo")
+    write_manifest_req = build_write_manifest_request(
+        repo_root_native="/repo",
+        mirrored_paths=frozenset({"a.txt"}),
+    )
     delete_req = build_delete_request(repo_root_native="/repo", paths=("a.txt", "b.txt"))
     restore_req = build_restore_request(repo_root_native="/repo", paths=("a.txt",))
 
     assert status_req["method"] == RpcMethod.STATUS
     assert status_req["args"]["repo_root_native"] == "/repo"
+    assert read_manifest_req["method"] == RpcMethod.READ_MANIFEST
+    assert read_manifest_req["args"]["repo_root_native"] == "/repo"
+    assert write_manifest_req["method"] == RpcMethod.WRITE_MANIFEST
+    assert write_manifest_req["args"]["paths"] == ["a.txt"]
     assert delete_req["method"] == RpcMethod.DELETE
     assert delete_req["args"]["paths"] == ["a.txt", "b.txt"]
     assert restore_req["method"] == RpcMethod.RESTORE
@@ -119,10 +132,14 @@ def test_build_status_delete_and_restore_responses() -> None:
             entries=(),
         )
     )
+    read_manifest_resp = build_read_manifest_response(frozenset({"a.txt"}))
+    write_manifest_resp = build_write_manifest_response()
     delete_resp = build_delete_response(())
     restore_resp = build_restore_response(result=RestoreResult(restored_count=0, warnings=()))
 
     assert status_resp["data"]["modified_count"] == 1
+    assert read_manifest_resp["data"]["paths"] == ["a.txt"]
+    assert write_manifest_resp["data"]["saved"] is True
     assert delete_resp["data"]["outcomes"] == []
     assert restore_resp["data"]["warnings"] == []
 
@@ -141,6 +158,8 @@ def test_rpc_method_enum_values() -> None:
     assert RpcMethod.LOCATE_REPO == "locate_repo"
     assert RpcMethod.CONFIGURE_PEER == "configure_peer"
     assert RpcMethod.STATUS == "status"
+    assert RpcMethod.READ_MANIFEST == "read_manifest"
+    assert RpcMethod.WRITE_MANIFEST == "write_manifest"
     assert RpcMethod.DELETE == "delete"
     assert RpcMethod.RESTORE == "restore"
     assert RpcMethod.COMPARE_HEADS == "compare_heads"
