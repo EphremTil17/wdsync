@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from wdsync.core.models import SyncPlan
+from wdsync.core.models import RestoreResult, SyncPlan
 from wdsync.core.runner import CommandRunner
 from wdsync.sync.engine import execute_sync, restore_files
 
@@ -55,12 +55,11 @@ def test_restore_files_runs_git_restore(
     repo = repo_factory("dest", files={"file.txt": "content\n"})
     (repo / "file.txt").unlink()  # produces " D" status
 
-    restored, warnings = restore_files(
-        ("file.txt",), git_runner, dest_git="git", dest_root_native=str(repo)
+    result = restore_files(
+        ("file.txt",), git_runner, dest_git_cmd=("git",), dest_root_native=str(repo)
     )
 
-    assert restored == 1
-    assert warnings == []
+    assert result == RestoreResult(restored_count=1, warnings=())
     assert (repo / "file.txt").read_text(encoding="utf-8") == "content\n"
 
 
@@ -70,13 +69,13 @@ def test_restore_files_warns_on_failure(
 ) -> None:
     repo = repo_factory("dest", files={"file.txt": "content\n"})
 
-    restored, warnings = restore_files(
-        ("nonexistent.txt",), git_runner, dest_git="git", dest_root_native=str(repo)
+    result = restore_files(
+        ("nonexistent.txt",), git_runner, dest_git_cmd=("git",), dest_root_native=str(repo)
     )
 
-    assert restored == 0
-    assert len(warnings) == 1
-    assert "nonexistent.txt" in warnings[0]
+    assert result.restored_count == 0
+    assert len(result.warnings) == 1
+    assert "nonexistent.txt" in result.warnings[0]
 
 
 def test_restore_files_noop_when_empty(
@@ -85,7 +84,11 @@ def test_restore_files_noop_when_empty(
 ) -> None:
     repo = repo_factory("dest", files={"file.txt": "content\n"})
 
-    restored, warnings = restore_files((), git_runner, dest_git="git", dest_root_native=str(repo))
+    result = restore_files(
+        (),
+        git_runner,
+        dest_git_cmd=("git",),
+        dest_root_native=str(repo),
+    )
 
-    assert restored == 0
-    assert warnings == []
+    assert result == RestoreResult(restored_count=0, warnings=())

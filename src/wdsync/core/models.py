@@ -46,22 +46,76 @@ class Severity(StrEnum):
 
 
 @dataclass(frozen=True)
-class ProjectConfig:
-    dest_root: Path
-    config_path: Path
-    source_root: Path
-    source_root_windows: str
+class RepoEndpoint:
+    root: Path
+    native_root: str
+
+
+@dataclass(frozen=True)
+class GitExecution:
+    command_argv: tuple[str, ...]
+    repo_native_root: str
+
+    @property
+    def executable_name(self) -> str:
+        if not self.command_argv:
+            return "git"
+        return self.command_argv[-1]
+
+    def build(self, *args: str) -> list[str]:
+        return [*self.command_argv, "-C", self.repo_native_root, *args]
+
+
+@dataclass(frozen=True)
+class TransferExecution:
+    command_argv: tuple[str, ...]
+    source_root: str
+    dest_root: str
+
+    def build(self, *args: str) -> list[str]:
+        return [*self.command_argv, *args, f"{self.source_root}/", f"{self.dest_root}/"]
 
 
 @dataclass(frozen=True)
 class DirectionConfig:
     direction: SyncDirection
-    source_root: Path
-    source_root_native: str
-    source_git: str
-    dest_root: Path
-    dest_root_native: str
-    dest_git: str
+    source: RepoEndpoint
+    destination: RepoEndpoint
+    source_git: GitExecution
+    destination_git: GitExecution
+    transfer: TransferExecution
+    source_is_local: bool = True
+    destination_is_local: bool = True
+    peer_command_argv: tuple[str, ...] = ()
+
+    @property
+    def source_root(self) -> Path:
+        return self.source.root
+
+    @property
+    def dest_root(self) -> Path:
+        return self.destination.root
+
+    @property
+    def source_root_native(self) -> str:
+        return self.source.native_root
+
+    @property
+    def dest_root_native(self) -> str:
+        return self.destination.native_root
+
+    @property
+    def dest_git(self) -> str:
+        return self.destination_git.executable_name
+
+    def source_git_command(self, *args: str) -> list[str]:
+        return self.source_git.build(*args)
+
+    def dest_git_command(self, *args: str) -> list[str]:
+        return self.destination_git.build(*args)
+
+    def rsync_command(self, *args: str) -> list[str]:
+        return self.transfer.build(*args)
 
 
 @dataclass(frozen=True)
@@ -143,14 +197,6 @@ class SyncResult:
 
 
 @dataclass(frozen=True)
-class InitResult:
-    config: ProjectConfig
-    wrote_config: bool
-    exclude_path: Path
-    updated_exclude: bool
-
-
-@dataclass(frozen=True)
 class ShellInstallResult:
     shell: ShellName
     installed_paths: tuple[Path, ...]
@@ -171,10 +217,18 @@ class PeerConfig:
 
 
 @dataclass(frozen=True)
+class RuntimePreferences:
+    windows_peer_command_argv: tuple[str, ...] | None = None
+    wsl_peer_command_argv: tuple[str, ...] | None = None
+    wsl_distro: str | None = None
+
+
+@dataclass(frozen=True)
 class WdsyncConfig:
     version: int
     identity: Identity
     peer: PeerConfig | None
+    runtime: RuntimePreferences = field(default_factory=RuntimePreferences)
 
 
 @dataclass(frozen=True)
@@ -183,6 +237,7 @@ class InitializeResult:
     config_path: Path
     marker_path: Path
     identity: Identity
+    already_initialized: bool = False
 
 
 @dataclass(frozen=True)
@@ -196,6 +251,21 @@ class ConflictRecord:
     path: str
     source_xy: str
     dest_xy: str
+
+
+@dataclass(frozen=True)
+class DeleteOutcome:
+    path: str
+    deleted: bool
+    skipped: bool
+    skip_reason: str | None
+    used_sudo: bool
+
+
+@dataclass(frozen=True)
+class RestoreResult:
+    restored_count: int
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -216,18 +286,6 @@ class PreviewRowJSON(TypedDict):
     syncable: bool
 
 
-class PreviewJSON(TypedDict):
-    schema_version: int
-    direction: str
-    source_root: str
-    dest_root: str
-    total: int
-    syncable_count: int
-    skipped_count: int
-    warnings: list[str]
-    rows: list[PreviewRowJSON]
-
-
 class SyncJSON(TypedDict):
     schema_version: int
     direction: str
@@ -243,24 +301,40 @@ class SyncJSON(TypedDict):
     rows: list[PreviewRowJSON]
 
 
-class DestinationStateJSON(TypedDict):
-    head: str | None
-    modified_count: int
-    staged_count: int
-    untracked_count: int
-    is_dirty: bool
-
-
-class DoctorWarningJSON(TypedDict):
-    code: str
-    message: str
-    severity: str
-
-
 class ConflictJSON(TypedDict):
     path: str
     source_xy: str
     dest_xy: str
+
+
+class StatusRecordJSON(TypedDict):
+    raw_xy: str
+    path: str
+    orig_path: str | None
+    kind: str
+
+
+class RepoStatusJSON(TypedDict):
+    head: str | None
+    modified_count: int
+    staged_count: int
+    untracked_count: int
+    dirty_paths: list[str]
+    wt_deleted_paths: list[str]
+    entries: list[StatusRecordJSON]
+
+
+class DeleteOutcomeJSON(TypedDict):
+    path: str
+    deleted: bool
+    skipped: bool
+    skip_reason: str | None
+    used_sudo: bool
+
+
+class RestoreResultJSON(TypedDict):
+    restored_count: int
+    warnings: list[str]
 
 
 class StatusJSON(TypedDict):
@@ -275,14 +349,3 @@ class StatusJSON(TypedDict):
     source_entries: list[PreviewRowJSON]
     destination_entries: list[PreviewRowJSON]
     conflicts: list[ConflictJSON]
-
-
-class DoctorJSON(TypedDict):
-    schema_version: int
-    source_head: str | None
-    destination_head: str | None
-    source_dirty_count: int
-    head_relation: str
-    risk_level: str
-    destination: DestinationStateJSON
-    warnings: list[DoctorWarningJSON]

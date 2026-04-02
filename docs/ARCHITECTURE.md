@@ -8,15 +8,15 @@ things are built the way they are.
 
 ## Design Principles
 
-1. **Each side manages its own filesystem.** The WSL instance never manipulates
-   Windows files directly (no `/mnt/c/` deletions, restores, or permission
-   management). The Windows instance never touches `\\wsl$\`. Each side uses
-   its own native tools: `git` on WSL, `git.exe` on Windows, native `pathlib`
-   for file operations, native privilege escalation mechanisms.
+1. **Connection state is symmetric.** `wdsync connect` should leave both repos
+   configured after one successful call. No "primary" side should be required
+   after the initial handshake.
 
-2. **The only thing that crosses the boundary is intent.** One side tells the
-   other "these files changed, these were deleted, these need restoring" — the
-   receiving side executes locally using its own native tools.
+2. **Cross-environment boundaries are explicit.** Peer discovery, repo
+   inspection, and peer-side mutation happen over RPC. Only file transfer uses
+   translated peer paths, with environment-specific subprocess commands chosen
+   in one place rather than leaking ad hoc WSL/Windows branching through the
+   codebase.
 
 3. **Git is the source of truth.** wdsync reads `git status` to determine
    what's dirty, uses `git restore` to recover files, and uses git's remote
@@ -29,8 +29,20 @@ things are built the way they are.
    before it does it.
 
 5. **Zero friction setup.** `wdsync init` auto-detects the repo root and
-   identity. `wdsync connect` discovers the peer automatically. No manual
-   path entry unless auto-detection fails.
+   identity. `wdsync connect` discovers the peer automatically and persists the
+   reverse peer configuration. No manual path entry unless auto-detection or
+   custom runtime layout requires an override.
+
+### Current Release Boundary
+
+The current release uses a split control/data plane:
+
+- peer discovery and connection are bilateral RPC operations
+- peer repo inspection (`STATUS`) is RPC-native
+- peer-side delete and restore are RPC-native
+- file transfer uses rsync over translated peer paths
+
+The only cross-boundary translated-path operation left is file transfer.
 
 ---
 
@@ -68,24 +80,77 @@ communication.
 
 ### How It Works
 
-1. The initiating side (e.g., WSL) spawns the counterpart process:
-   `python.exe -m wdsync rpc` (for Windows) or `python3 -m wdsync rpc` (for WSL)
+1. The initiating side spawns the counterpart process using environment-aware
+   command selection. By default this is a validated `wdsync.exe` path from WSL
+   and a validated WSL `wdsync` executable path wrapped by `wsl.exe --exec`
+   from Windows, with runtime overrides available.
 2. Communication is JSON-over-stdin/stdout, one message per line
 3. The spawned process reads a command, executes it locally using native tools,
    and responds with the result
 4. File content transfer uses rsync (battle-tested, handles large files efficiently)
-5. All other operations (delete, restore, status) are executed natively by each side
+5. Connection/config propagation, status inspection, and peer-side mutation all
+   use RPC; rsync remains the only translated-path data-plane operation
 
-### Protocol Versioning
+### Protocol Design
 
-Every RPC message includes a `version` field. The handshake verifies version
-compatibility before any operations. This prevents the "WSL side updated but
-Windows side didn't" breakage.
+Every RPC message includes a `version` field. The connect flow uses three
+separate RPC calls:
+
+1. **Handshake** — protocol negotiation only. Verifies version compatibility
+   and exchanges capabilities. No identity or repo resolution.
+2. **Locate repo** — the caller sends its identity; the peer searches for a
+   matching local repo and returns the match along with its own identity.
+3. **Configure peer** — the initiator sends the reverse peer configuration so
+   the discovered repo saves the same link locally. If the peer repo has not
+   been initialized yet, it is initialized before saving the link.
+
+This separation keeps the handshake fast and decoupled from repo state.
 
 ```json
+// Handshake: protocol only
 {"version": 1, "method": "handshake", "args": {}}
-{"version": 1, "ok": true, "data": {"protocol_version": 1}, "error": null}
+{"version": 1, "ok": true, "data": {"protocol_version": 1, "capabilities": ["locate_repo", "configure_peer", "status", "delete", "restore", "compare_heads"]}, "error": null}
+
+// Locate repo: identity + discovery
+{"version": 1, "method": "locate_repo", "args": {"identity": {...}, "cached_root": "C:\\..."}}
+{"version": 1, "ok": true, "data": {"identity": {...}, "repo_root": "...", "matched_by": "remote_url"}, "error": null}
+
+// Configure peer: save reverse link on the discovered repo
+{"version": 1, "method": "configure_peer", "args": {"repo_root_native": "...", "peer": {...}, "allow_initialize": true}}
+{"version": 1, "ok": true, "data": {"configured": true}, "error": null}
 ```
+
+### Peer Discovery
+
+The `locate_repo` handler runs a layered search on the peer side:
+
+Before any candidate is accepted, it must satisfy two conditions:
+
+1. **Identity match** — it must resolve to the same logical project
+   (`remote_url` first, then `root_commits`)
+2. **Native-path match** — it must be native to the peer environment, not just
+   reachable through a mount bridge
+
+Examples:
+- A WSL peer accepts `/home/...` repos but rejects `/mnt/<drive>/...`
+- A Windows peer accepts `C:\...` repos but rejects `\\wsl$...` /
+  `\\wsl.localhost\...`
+
+This rule prevents the peer from rediscovering the initiator repo through a
+cross-mounted filesystem view. Without it, a Windows-initiated connect could
+accidentally bind the WSL peer to the Windows repo as seen at `/mnt/c/...`
+instead of the real WSL working copy in `/home/...`.
+
+With that constraint in place, discovery proceeds as a layered search:
+
+1. **Cached root** — if the caller provides a previous native peer path, check
+   it first (instant on reconnects)
+2. **Peer cwd** — if the process cwd is a native matching git repo, done
+3. **Common directories** — environment-aware scan of well-known project dirs
+   (Windows: `~/source/repos`, `~/Documents/Projects`, `~/Projects`, `~/repos`,
+   `~/dev`; WSL/Linux: `~/projects`, `~/repos`, `~/dev`, `~/src`)
+4. **Bounded walk** — 2 levels deep per directory, cap at 50 candidates
+5. **PermissionError** — caught and skipped silently
 
 ---
 
@@ -94,7 +159,7 @@ Windows side didn't" breakage.
 | Command | Purpose |
 |---|---|
 | `wdsync init` | Auto-detect repo root and identity, write config |
-| `wdsync connect` | Discover peer repo, establish the two-way link |
+| `wdsync connect` | Discover peer repo and establish the two-way link from either side |
 | `wdsync disconnect` | Remove the link |
 | `wdsync fetch` | Pull from peer into local repo |
 | `wdsync send` | Push from local repo to peer |
@@ -146,19 +211,29 @@ note pointing to the config location.
 {
   "version": 1,
   "identity": {
-    "remote_url": "https://github.com/user/repo.git",
-    "root_commit": "abc123def456..."
+    "remote_url": "https://github.com/user/repo",
+    "root_commits": ["abc123def456..."]
   },
   "peer": {
-    "command": "python.exe -m wdsync",
-    "connected": true
+    "command_argv": ["wdsync.exe"],
+    "root": "/mnt/c/Users/user/repo",
+    "root_native": "C:\\Users\\user\\repo"
   },
-  "environment": "wsl"
+  "runtime": {
+    "windows_peer_command_argv": ["wdsync.exe"],
+    "wsl_peer_command_argv": ["wdsync"],
+    "wsl_distro": "Ubuntu-24.04"
+  }
 }
 ```
 
-The `identity` block is populated during `init`. The `peer` block is populated
-during `connect`. The `environment` is auto-detected.
+The `identity` block is populated during `init` (remote URL normalized,
+root commits sorted). The `peer` block is populated during `connect`
+(`command_argv` as a list to avoid shell parsing, `root` is the locally
+accessible translated path, `root_native` is the peer's filesystem path). The
+optional `runtime` block persists peer-launch overrides such as custom command
+argv and a preferred WSL distro. `repo_root` and `environment` are
+runtime-derived — not persisted.
 
 ---
 
@@ -213,11 +288,11 @@ Rotation at 5MB with 3 retained files prevents unbounded growth.
 | File modified in source only | Copied to destination |
 | File modified in destination only | Not touched (destination changes preserved) |
 | File modified on both sides | **Conflict** — skipped unless `--force` |
-| File deleted in source (tracked) | Deleted from destination (natively) |
+| File deleted in source (tracked) | Deleted from destination through the translated destination path |
 | File deleted in source (untracked, previously synced) | Deleted via manifest tracking |
-| File deleted then restored in source | Restored in destination via native `git restore` |
+| File deleted then restored in source | Restored in destination via environment-appropriate `git restore` command |
 | Deleted file has local changes in destination | Skipped to avoid data loss |
-| Permission denied on deletion | Handled natively by each side (sudo on WSL, UAC on Windows) |
+| Permission denied on deletion | WSL destinations may prompt for `sudo`; Windows-path failures are skipped |
 | Path traversal attempt | Blocked |
 | Empty parent directory after deletion | Pruned automatically |
 
@@ -259,9 +334,9 @@ wdsync auto-detects its runtime environment:
 
 This determines:
 - Which git executable to use by default (`git` vs `git.exe`)
-- Which privilege escalation to offer (sudo vs UAC)
-- How to spawn the peer process
-- What to write in the config's `environment` field
+- Whether `sudo` retry is meaningful for the current destination path
+- How to resolve and spawn the peer process for the opposite environment
+- Which common project directories to scan during peer discovery
 
 ---
 
@@ -269,8 +344,8 @@ This determines:
 
 These are not planned for implementation yet but inform current design decisions:
 
-- **Native file transfer** — replace rsync with RPC-based file payloads for
-  repos that don't have rsync installed
+- **Native peer execution** — move delete/restore/status and possibly file
+  transfer behind RPC so sync no longer depends on translated peer paths
 - **Windows companion binary** — PyInstaller/Nuitka standalone `.exe` for
   Windows users who don't want Python installed
 - **Rust rewrite** — for startup time and single-binary distribution, not for

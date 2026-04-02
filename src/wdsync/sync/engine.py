@@ -6,7 +6,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 from wdsync.core.exceptions import CommandExecutionError
-from wdsync.core.models import SyncPlan, SyncResult
+from wdsync.core.models import RestoreResult, SyncPlan, SyncResult
 from wdsync.core.runner import CommandRunner
 from wdsync.sync.deleter import delete_files
 
@@ -23,27 +23,55 @@ def restore_files(
     restore_paths: tuple[str, ...],
     runner: CommandRunner,
     *,
-    dest_git: str = "git",
+    dest_git_cmd: tuple[str, ...] = ("git",),
     dest_root_native: str = "",
-) -> tuple[int, list[str]]:
+) -> RestoreResult:
     if not restore_paths:
-        return 0, []
+        return RestoreResult(restored_count=0, warnings=())
 
     warnings: list[str] = []
     restored = 0
 
     try:
-        runner.run([dest_git, "-C", dest_root_native, "restore", "--", *restore_paths])
+        runner.run([*dest_git_cmd, "-C", dest_root_native, "restore", "--", *restore_paths])
         restored = len(restore_paths)
     except CommandExecutionError:
         for path in restore_paths:
             try:
-                runner.run([dest_git, "-C", dest_root_native, "restore", "--", path])
+                runner.run([*dest_git_cmd, "-C", dest_root_native, "restore", "--", path])
                 restored += 1
             except CommandExecutionError:
                 warnings.append(f"warning: could not restore {path!r} in destination")
 
-    return restored, warnings
+    return RestoreResult(restored_count=restored, warnings=tuple(warnings))
+
+
+def copy_files(
+    plan: SyncPlan,
+    runner: CommandRunner,
+    *,
+    rsync_cmd: tuple[str, ...] = ("rsync",),
+    rsync_source_root: str | None = None,
+    rsync_dest_root: str | None = None,
+) -> bool:
+    if not plan.copy_paths:
+        return False
+
+    files_from_path = _write_files_from(plan.copy_paths)
+    try:
+        runner.run(
+            [
+                *rsync_cmd,
+                "-rlt",
+                "--from0",
+                f"--files-from={files_from_path}",
+                f"{(rsync_source_root or str(plan.source_root))}/",
+                f"{(rsync_dest_root or str(plan.dest_root))}/",
+            ]
+        )
+    finally:
+        files_from_path.unlink(missing_ok=True)
+    return True
 
 
 def execute_sync(
@@ -53,13 +81,16 @@ def execute_sync(
     dest_dirty_paths: frozenset[str] = frozenset(),
     confirm_sudo: Callable[[str], bool] = lambda _: False,
     prune_empty_dirs: bool = True,
-    dest_git: str = "git",
+    dest_git_cmd: tuple[str, ...] = ("git",),
     dest_root_native: str = "",
+    rsync_cmd: tuple[str, ...] = ("rsync",),
+    rsync_source_root: str | None = None,
+    rsync_dest_root: str | None = None,
 ) -> SyncResult:
-    restored_count, restore_warnings = restore_files(
+    restore_result = restore_files(
         plan.restore_paths,
         runner,
-        dest_git=dest_git,
+        dest_git_cmd=dest_git_cmd,
         dest_root_native=dest_root_native or str(plan.dest_root),
     )
 
@@ -71,7 +102,7 @@ def execute_sync(
     )
     deleted_count = sum(1 for o in outcomes if o.deleted)
 
-    extra_warnings: list[str] = list(restore_warnings)
+    extra_warnings: list[str] = list(restore_result.warnings)
     for outcome in outcomes:
         if outcome.skipped and outcome.skip_reason == "dest-modified":
             extra_warnings.append(
@@ -94,29 +125,22 @@ def execute_sync(
             deleted_count=deleted_count,
             skipped_count=len(plan.skipped_paths),
             performed_copy=False,
-            restored_count=restored_count,
+            restored_count=restore_result.restored_count,
         )
 
-    files_from_path = _write_files_from(plan.copy_paths)
-    try:
-        runner.run(
-            [
-                "rsync",
-                "-rlt",
-                "--from0",
-                f"--files-from={files_from_path}",
-                f"{plan.source_root}/",
-                f"{plan.dest_root}/",
-            ]
-        )
-    finally:
-        files_from_path.unlink(missing_ok=True)
+    performed_copy = copy_files(
+        plan,
+        runner,
+        rsync_cmd=rsync_cmd,
+        rsync_source_root=rsync_source_root,
+        rsync_dest_root=rsync_dest_root,
+    )
 
     return SyncResult(
         plan=plan,
         copied_count=len(plan.copy_paths),
         deleted_count=deleted_count,
         skipped_count=len(plan.skipped_paths),
-        performed_copy=True,
-        restored_count=restored_count,
+        performed_copy=performed_copy,
+        restored_count=restore_result.restored_count,
     )

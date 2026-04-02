@@ -27,10 +27,6 @@ class ConfigValidationError(WdSyncError):
     """Raised when .wdsync is present but invalid."""
 
 
-class SourceRepositoryError(WdSyncError):
-    """Raised when the configured Windows source repo is invalid."""
-
-
 class StatusParseError(WdSyncError):
     """Raised when Git porcelain output cannot be parsed."""
 

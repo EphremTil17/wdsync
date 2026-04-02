@@ -7,7 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from wdsync.core.models import ProjectConfig
+from wdsync.core.models import (
+    DirectionConfig,
+    GitExecution,
+    RepoEndpoint,
+    SyncDirection,
+    TransferExecution,
+)
 from wdsync.core.runner import CommandRunner
 
 
@@ -33,12 +39,93 @@ def git_runner(tmp_path: Path) -> CommandRunner:
         bin_dir / "wslpath",
         "#!/usr/bin/env bash\n"
         'if [[ "$1" == "-w" ]]; then\n'
+        '  if [[ "$2" =~ ^/mnt/([a-zA-Z])/(.*)$ ]]; then\n'
+        "    drive=$(printf '%s' \"${BASH_REMATCH[1]}\" | tr '[:lower:]' '[:upper:]')\n"
+        "    rest=${BASH_REMATCH[2]//\\//\\\\}\n"
+        '    printf \'%s:\\\\%s\\n\' "$drive" "$rest"\n'
+        "    exit 0\n"
+        "  fi\n"
+        '  if [[ "$2" == /home/* ]]; then\n'
+        "    rest=${2//\\//\\\\}\n"
+        "    printf '\\\\\\\\wsl.localhost\\\\Ubuntu%s\\n' \"$rest\"\n"
+        "    exit 0\n"
+        "  fi\n"
         "  printf '%s\\n' \"$2\"\n"
         "  exit 0\n"
         "fi\n"
-        "exit 1\n",
+        'if [[ "$1" == "-a" ]]; then\n'
+        '  if [[ "$2" =~ ^([A-Za-z]):\\\\(.*)$ ]]; then\n'
+        "    drive=$(printf '%s' \"${BASH_REMATCH[1]}\" | tr '[:upper:]' '[:lower:]')\n"
+        "    rest=${BASH_REMATCH[2]//\\\\//}\n"
+        '    printf \'/mnt/%s/%s\\n\' "$drive" "$rest"\n'
+        "    exit 0\n"
+        "  fi\n"
+        "  printf '%s\\n' \"$2\"\n"
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$1" =~ ^([A-Za-z]):\\\\(.*)$ ]]; then\n'
+        "  drive=$(printf '%s' \"${BASH_REMATCH[1]}\" | tr '[:upper:]' '[:lower:]')\n"
+        "  rest=${BASH_REMATCH[2]//\\\\//}\n"
+        '  printf \'/mnt/%s/%s\\n\' "$drive" "$rest"\n'
+        "  exit 0\n"
+        "fi\n"
+        "printf '%s\\n' \"$1\"\n"
+        "exit 0\n",
     )
-    return CommandRunner({"git.exe": git_exe, "wslpath": wslpath})
+    wsl_exe = _write_executable(
+        bin_dir / "wsl.exe",
+        "#!/usr/bin/env bash\n"
+        'if [[ "$1" == "--" || "$1" == "--exec" ]]; then\n'
+        "  shift\n"
+        "fi\n"
+        'if [[ "$1" == "-d" ]]; then\n'
+        "  shift 2\n"
+        '  if [[ "$1" == "--" || "$1" == "--exec" ]]; then\n'
+        "    shift\n"
+        "  fi\n"
+        "fi\n"
+        'if [[ "$1" == "wslpath" ]]; then\n'
+        "  shift\n"
+        '  if [[ "$1" == "-a" || "$1" == "-w" ]]; then\n'
+        '    if [[ "$1" == "-a" && "$2" =~ ^([A-Za-z]):\\\\(.*)$ ]]; then\n'
+        "      drive=$(printf '%s' \"${BASH_REMATCH[1]}\" | tr '[:upper:]' '[:lower:]')\n"
+        "      rest=${BASH_REMATCH[2]//\\\\//}\n"
+        '      printf \'/mnt/%s/%s\\n\' "$drive" "$rest"\n'
+        "      exit 0\n"
+        "    fi\n"
+        '    if [[ "$1" == "-w" && "$2" == /home/* ]]; then\n'
+        "      rest=${2//\\//\\\\}\n"
+        "      printf '\\\\\\\\wsl.localhost\\\\Ubuntu%s\\n' \"$rest\"\n"
+        "      exit 0\n"
+        "    fi\n"
+        "    printf '%s\\n' \"$2\"\n"
+        "    exit 0\n"
+        "  fi\n"
+        "  printf '%s\\n' \"$1\"\n"
+        "  exit 0\n"
+        "fi\n"
+        'if [[ "$1" == "git" ]]; then\n'
+        "  shift\n"
+        '  exec git "$@"\n'
+        "fi\n"
+        'if [[ "$1" == "rsync" ]]; then\n'
+        "  shift\n"
+        '  exec rsync "$@"\n'
+        "fi\n"
+        'exec "$@"\n',
+    )
+    wdsync_exe = _write_executable(
+        bin_dir / "wdsync.exe",
+        '#!/usr/bin/env bash\nexec python -m wdsync "$@"\n',
+    )
+    return CommandRunner(
+        {
+            "git.exe": git_exe,
+            "wsl.exe": wsl_exe,
+            "wslpath": wslpath,
+            "wdsync.exe": wdsync_exe,
+        }
+    )
 
 
 @pytest.fixture()
@@ -71,13 +158,42 @@ def repo_factory(tmp_path: Path) -> Callable[..., Path]:
 
 
 @pytest.fixture()
-def project_config_factory() -> Callable[[Path, Path], ProjectConfig]:
-    def _factory(source_root: Path, dest_root: Path) -> ProjectConfig:
-        return ProjectConfig(
-            dest_root=dest_root,
-            config_path=dest_root / ".wdsync",
-            source_root=source_root,
-            source_root_windows=str(source_root),
+def direction_config_factory() -> Callable[..., DirectionConfig]:
+    def _factory(
+        source_root: Path,
+        dest_root: Path,
+        direction: SyncDirection = SyncDirection.FETCH,
+    ) -> DirectionConfig:
+        if direction is SyncDirection.FETCH:
+            return DirectionConfig(
+                direction=direction,
+                source=RepoEndpoint(root=source_root, native_root=str(source_root)),
+                destination=RepoEndpoint(root=dest_root, native_root=str(dest_root)),
+                source_git=GitExecution(command_argv=("git",), repo_native_root=str(source_root)),
+                destination_git=GitExecution(
+                    command_argv=("git",),
+                    repo_native_root=str(dest_root),
+                ),
+                transfer=TransferExecution(
+                    command_argv=("rsync",),
+                    source_root=str(source_root),
+                    dest_root=str(dest_root),
+                ),
+            )
+        return DirectionConfig(
+            direction=direction,
+            source=RepoEndpoint(root=dest_root, native_root=str(dest_root)),
+            destination=RepoEndpoint(root=source_root, native_root=str(source_root)),
+            source_git=GitExecution(command_argv=("git",), repo_native_root=str(dest_root)),
+            destination_git=GitExecution(
+                command_argv=("git",),
+                repo_native_root=str(source_root),
+            ),
+            transfer=TransferExecution(
+                command_argv=("rsync",),
+                source_root=str(dest_root),
+                dest_root=str(source_root),
+            ),
         )
 
     return _factory

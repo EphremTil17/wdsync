@@ -2,31 +2,21 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from wdsync.core.exceptions import SudoDeleteError
-from wdsync.core.models import SyncPlan
+from wdsync.core.models import DeleteOutcome, SyncPlan
 from wdsync.core.path_utils import is_wsl_windows_path
 
 
-@dataclass(frozen=True)
-class DeletionOutcome:
-    path: str
-    deleted: bool
-    skipped: bool
-    skip_reason: str | None
-    used_sudo: bool
-
-
-def _skip(rel_path: str, reason: str) -> DeletionOutcome:
-    return DeletionOutcome(
+def _skip(rel_path: str, reason: str) -> DeleteOutcome:
+    return DeleteOutcome(
         path=rel_path, deleted=False, skipped=True, skip_reason=reason, used_sudo=False
     )
 
 
-def _deleted(rel_path: str, *, used_sudo: bool) -> DeletionOutcome:
-    return DeletionOutcome(
+def _deleted(rel_path: str, *, used_sudo: bool) -> DeleteOutcome:
+    return DeleteOutcome(
         path=rel_path, deleted=True, skipped=False, skip_reason=None, used_sudo=used_sudo
     )
 
@@ -67,7 +57,7 @@ def _unlink_with_sudo_fallback(
     rel_path: str,
     confirm_sudo: Callable[[str], bool],
     dest_root: Path,
-) -> DeletionOutcome:
+) -> DeleteOutcome:
     try:
         abs_path.unlink()
         return _deleted(rel_path, used_sudo=False)
@@ -88,7 +78,7 @@ def _delete_one(
     dest_dirty_paths: frozenset[str],
     confirm_sudo: Callable[[str], bool],
     prune_empty_dirs: bool,
-) -> DeletionOutcome:
+) -> DeleteOutcome:
     abs_path = _resolve_safe(plan.dest_root, rel_path)
     if abs_path is None:
         return _skip(rel_path, "path-traversal")
@@ -111,7 +101,7 @@ def delete_files(
     *,
     confirm_sudo: Callable[[str], bool],
     prune_empty_dirs: bool = True,
-) -> tuple[DeletionOutcome, ...]:
+) -> tuple[DeleteOutcome, ...]:
     return tuple(
         _delete_one(rel_path, plan, dest_dirty_paths, confirm_sudo, prune_empty_dirs)
         for rel_path in plan.delete_paths

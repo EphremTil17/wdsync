@@ -70,9 +70,16 @@ def configure_logging():
         # All timestamps are UTC regardless of host timezone
         # Concise format for INFO/SUCCESS/PRIVACY
         if record["level"].name in ["INFO", "SUCCESS", "PRIVACY"]:
-            return "<white>{time:YYYY-MM-DD HH:mm:ss!UTC}</white> | <level>{level: <8}</level> | <white>{message}</white>\n"
+            return (
+                "<white>{time:YYYY-MM-DD HH:mm:ss!UTC}</white> | "
+                "<level>{level: <8}</level> | <white>{message}</white>\n"
+            )
         # Verbose format for ERROR/WARNING/DEBUG
-        return "<white>{time:YYYY-MM-DD HH:mm:ss!UTC}</white> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>\n"
+        return (
+            "<white>{time:YYYY-MM-DD HH:mm:ss!UTC}</white> | "
+            "<level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:"
+            "<cyan>{line}</cyan> - <level>{message}</level>\n"
+        )
 
     # --- Intercept Standard Logging (Uvicorn/FastAPI) ---
     class InterceptHandler(logging.Handler):

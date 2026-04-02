@@ -7,8 +7,7 @@ from typing import cast
 import pytest
 
 from wdsync.core import path_utils
-from wdsync.core.exceptions import ShellDetectionError, UnsupportedEnvironmentError
-from wdsync.core.runner import CommandRunner
+from wdsync.core.exceptions import ShellDetectionError
 
 
 def test_is_wsl_uses_environment_variables(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -34,30 +33,9 @@ def test_is_wsl_falls_back_to_kernel_release(monkeypatch: pytest.MonkeyPatch) ->
     assert path_utils.is_wsl() is True
 
 
-def test_ensure_wsl_environment_raises_when_not_in_wsl(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(path_utils, "is_wsl", lambda: False)
-
-    with pytest.raises(UnsupportedEnvironmentError):
-        path_utils.ensure_wsl_environment()
-
-
-def test_normalize_and_validate_source_paths(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-
-    normalized = path_utils.normalize_source_path("~/project")
-
-    assert normalized == tmp_path / "project"
+def test_is_wsl_windows_path() -> None:
     assert path_utils.is_wsl_windows_path(Path("/mnt/c/Users/example/project")) is True
     assert path_utils.is_wsl_windows_path(Path("/home/ephrem/project")) is False
-
-
-def test_wsl_to_windows_path_uses_runner(git_runner: CommandRunner, tmp_path: Path) -> None:
-    source_path = tmp_path / "project"
-
-    assert path_utils.wsl_to_windows_path(source_path, git_runner) == str(source_path)
 
 
 def test_detect_shell_prefers_explicit_then_env_then_parent(

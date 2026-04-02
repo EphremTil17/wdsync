@@ -4,9 +4,8 @@ import os
 import re
 from pathlib import Path
 
-from wdsync.core.exceptions import ShellDetectionError, UnsupportedEnvironmentError
+from wdsync.core.exceptions import ShellDetectionError
 from wdsync.core.models import ShellName
-from wdsync.core.runner import CommandRunner
 
 _SRC_PATTERN = re.compile(r"^/mnt/[A-Za-z]/")
 
@@ -20,22 +19,8 @@ def is_wsl() -> bool:
     return False
 
 
-def ensure_wsl_environment() -> None:
-    if not is_wsl():
-        raise UnsupportedEnvironmentError("wdsync: this tool must be run from WSL.")
-
-
-def normalize_source_path(raw_source: str) -> Path:
-    return Path(raw_source.strip()).expanduser()
-
-
 def is_wsl_windows_path(path: Path) -> bool:
     return _SRC_PATTERN.match(path.as_posix()) is not None
-
-
-def wsl_to_windows_path(path: Path, runner: CommandRunner) -> str:
-    result = runner.run(["wslpath", "-w", str(path)])
-    return result.stdout_text().strip()
 
 
 def _shell_from_name(value: str) -> ShellName | None:

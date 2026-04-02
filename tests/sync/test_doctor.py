@@ -10,10 +10,13 @@ from wdsync.core.models import (
     DestinationState,
     DirectionConfig,
     DoctorReport,
+    GitExecution,
     HeadRelation,
+    RepoEndpoint,
     RiskLevel,
     SourceState,
     SyncDirection,
+    TransferExecution,
 )
 from wdsync.core.runner import CommandResult, CommandRunner
 from wdsync.sync import doctor
@@ -38,12 +41,15 @@ class _MergeBaseRunner:
 def _dconfig() -> DirectionConfig:
     return DirectionConfig(
         direction=SyncDirection.FETCH,
-        source_root=Path("/tmp/source"),
-        source_root_native="/tmp/source",
-        source_git="git.exe",
-        dest_root=Path("/tmp/dest"),
-        dest_root_native="/tmp/dest",
-        dest_git="git",
+        source=RepoEndpoint(root=Path("/tmp/source"), native_root="/tmp/source"),
+        destination=RepoEndpoint(root=Path("/tmp/dest"), native_root="/tmp/dest"),
+        source_git=GitExecution(command_argv=("git.exe",), repo_native_root="/tmp/source"),
+        destination_git=GitExecution(command_argv=("git",), repo_native_root="/tmp/dest"),
+        transfer=TransferExecution(
+            command_argv=("rsync",),
+            source_root="/tmp/source",
+            dest_root="/tmp/dest",
+        ),
     )
 
 
@@ -197,8 +203,10 @@ def test_build_doctor_report_marks_clean_repos_as_low_risk(
         source_head: str | None,
         destination_head: str | None,
         runner: CommandRunner,
+        *,
+        peer_compare_heads: object | None = None,
     ) -> HeadRelation:
-        del dconfig, source_head, destination_head, runner
+        del dconfig, source_head, destination_head, runner, peer_compare_heads
         return HeadRelation.SAME
 
     monkeypatch.setattr(doctor, "determine_head_relation", determine_head_relation)
@@ -229,8 +237,10 @@ def test_build_doctor_report_uses_different_message_for_unrelated_heads(
         source_head: str | None,
         destination_head: str | None,
         runner: CommandRunner,
+        *,
+        peer_compare_heads: object | None = None,
     ) -> HeadRelation:
-        del dconfig, source_head, destination_head, runner
+        del dconfig, source_head, destination_head, runner, peer_compare_heads
         return HeadRelation.DIFFERENT
 
     monkeypatch.setattr(doctor, "determine_head_relation", determine_head_relation)

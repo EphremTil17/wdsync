@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 # Core package/runtime contract
 name = "wdsync"
-version = "0.4.0"
+version = "0.5.0"
 description = "Mirror dirty files from a Windows Git repo into a matching WSL repo."
 requires-python = ">=3.11"
 dependencies = [
@@ -68,6 +68,9 @@ packages = ["src/wdsync"]
 [tool.pytest.ini_options]
 addopts = "-q --cov=src/wdsync --cov-report=term-missing"
 testpaths = ["tests"]
+markers = [
+  "crossenv: opt-in cross-environment smoke tests that require real Windows and WSL installs",
+]
 
 [tool.coverage.run]
 branch = true

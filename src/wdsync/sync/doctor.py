@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from wdsync.core.models import (
     DestinationState,
@@ -30,33 +30,52 @@ def determine_head_relation(
     source_head: str | None,
     destination_head: str | None,
     runner: CommandRunner,
+    *,
+    peer_compare_heads: Callable[[str, str], HeadRelation] | None = None,
 ) -> HeadRelation:
     if source_head is None or destination_head is None:
         return HeadRelation.UNKNOWN
     if source_head == destination_head:
         return HeadRelation.SAME
 
-    candidate_commands: tuple[tuple[str, ...], ...] = (
-        (dconfig.dest_git, "-C", dconfig.dest_root_native),
-        (dconfig.source_git, "-C", dconfig.source_root_native),
+    if dconfig.source_is_local:
+        local_command = tuple(dconfig.source_git_command())
+    else:
+        local_command = tuple(dconfig.dest_git_command())
+    relation = determine_head_relation_from_command(
+        local_command,
+        source_head,
+        destination_head,
+        runner,
     )
-    for command in candidate_commands:
-        if not (
-            _repo_knows_commit(command, source_head, runner)
-            and _repo_knows_commit(command, destination_head, runner)
-        ):
-            continue
-        if _is_ancestor(command, source_head, destination_head, runner):
-            return HeadRelation.DESTINATION_AHEAD
-        if _is_ancestor(command, destination_head, source_head, runner):
-            return HeadRelation.SOURCE_AHEAD
-        merge_base = runner.run(
-            [*command, "merge-base", source_head, destination_head],
-            check=False,
-        )
-        return HeadRelation.DIVERGED if merge_base.returncode == 0 else HeadRelation.DIFFERENT
+    if relation is not None:
+        return relation
+    if peer_compare_heads is not None:
+        return peer_compare_heads(source_head, destination_head)
 
     return HeadRelation.DIFFERENT
+
+
+def determine_head_relation_from_command(
+    command: Sequence[str],
+    source_head: str,
+    destination_head: str,
+    runner: CommandRunner,
+) -> HeadRelation | None:
+    if not (
+        _repo_knows_commit(command, source_head, runner)
+        and _repo_knows_commit(command, destination_head, runner)
+    ):
+        return None
+    if _is_ancestor(command, source_head, destination_head, runner):
+        return HeadRelation.DESTINATION_AHEAD
+    if _is_ancestor(command, destination_head, source_head, runner):
+        return HeadRelation.SOURCE_AHEAD
+    merge_base = runner.run(
+        [*command, "merge-base", source_head, destination_head],
+        check=False,
+    )
+    return HeadRelation.DIVERGED if merge_base.returncode == 0 else HeadRelation.DIFFERENT
 
 
 def build_doctor_report(
@@ -64,12 +83,15 @@ def build_doctor_report(
     source_state: SourceState,
     destination_state: DestinationState,
     runner: CommandRunner,
+    *,
+    peer_compare_heads: Callable[[str, str], HeadRelation] | None = None,
 ) -> DoctorReport:
     head_relation = determine_head_relation(
         dconfig,
         source_state.head,
         destination_state.head,
         runner,
+        peer_compare_heads=peer_compare_heads,
     )
     warnings: list[DoctorWarning] = []
 

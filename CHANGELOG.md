@@ -5,6 +5,60 @@ All notable changes to `wdsync` will be documented in this file.
 The format is based on Keep a Changelog, and this project aims to follow
 Semantic Versioning once formal releases begin.
 
+## [0.5.0] - 2026-04-01
+
+### Added
+
+- Full RPC-based peer connection: `wdsync connect` spawns the peer process
+  (`python.exe -m wdsync rpc`), performs a protocol handshake, discovers the
+  matching repo via layered search, verifies identity, and saves the peer
+  connection.
+- RPC client module (`rpc/client.py`): context-manager `RpcClient` class that
+  spawns a subprocess, exchanges JSON messages over stdin/stdout with timeout
+  support, drains stderr on failure paths for diagnostics.
+- Peer discovery module (`rpc/discovery.py`): environment-aware layered search
+  that checks cached last-known root, peer cwd, then common project directories
+  with bounded depth walk. Supports both Windows and WSL/Linux search layouts.
+- RPC handlers module (`rpc/handlers.py`): dispatches HANDSHAKE (protocol-only,
+  version + capabilities) and LOCATE_REPO (identity resolution + discovery).
+- Connect flow module (`rpc/connect.py`): orchestrates the full connect
+  workflow with identity verification and wslpath translation.
+- Multi-turn `wdsync rpc` server: reads JSON from stdin in a loop, dispatches
+  to handlers, responds on stdout. Replaces the single-shot stub.
+- `load_wdsync_config_with_paths()` returns config, repo root, and state dir in
+  one pass, eliminating duplicate subprocess calls in CLI commands.
+- Strict peer config validation: `_config_from_dict()` rejects incomplete peer
+  blocks (empty command_argv, root, or root_native).
+- Hardened RPC response parsing: non-numeric version fields, non-dict data
+  fields, and non-boolean ok fields are normalized or rejected as
+  `PeerConnectionError` instead of leaking raw `ValueError`/`TypeError`.
+- `SyncContext` adoption: `_sync_flow` and `status` now use
+  `build_sync_context()` instead of computing state inline.
+
+### Changed
+
+- Protocol simplified: handshake is now protocol-only (version + capabilities).
+  Identity resolution moved to `locate_repo`, keeping handshake fast and
+  decoupled from repo state.
+- `locate_repo` response now includes peer identity alongside repo root and
+  matched_by, so the caller can verify identity match.
+- `locate_repo` request accepts optional `cached_root` for instant reconnects.
+
+### Removed
+
+- All legacy INI-era code: `ProjectConfig`, `InitResult`, `load_project_config`,
+  `init_project`, `parse_config_text`, `discover_matching_windows_repo`,
+  `find_destination_root`, `_build_project_config`, `_remotes_match`,
+  `_common_project_dirs`.
+- Legacy `build_direction_config` (the version taking `ProjectConfig`).
+- `SourceRepositoryError` exception (unused after INI removal).
+- `ensure_wsl_environment`, `normalize_source_path`, `wsl_to_windows_path`
+  from path_utils (replaced by environment detection and wslpath calls).
+- Dead TypedDicts: `PreviewJSON`, `DoctorJSON`, `DestinationStateJSON`,
+  `DoctorWarningJSON`.
+- 17 legacy tests replaced with modern equivalents using `WdsyncConfig`,
+  `DirectionConfig`, and the new `direction_config_factory` fixture.
+
 ## [0.4.0] - 2026-03-31
 
 ### Added

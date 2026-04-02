@@ -4,7 +4,13 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from wdsync.core.models import DirectionConfig, SyncDirection
+from wdsync.core.models import (
+    DirectionConfig,
+    GitExecution,
+    RepoEndpoint,
+    SyncDirection,
+    TransferExecution,
+)
 from wdsync.core.runner import CommandRunner
 from wdsync.git.dest import read_destination_head, read_destination_state
 
@@ -12,12 +18,15 @@ from wdsync.git.dest import read_destination_head, read_destination_state
 def _dest_dconfig(repo: Path) -> DirectionConfig:
     return DirectionConfig(
         direction=SyncDirection.FETCH,
-        source_root=repo,
-        source_root_native=str(repo),
-        source_git="git",
-        dest_root=repo,
-        dest_root_native=str(repo),
-        dest_git="git",
+        source=RepoEndpoint(root=repo, native_root=str(repo)),
+        destination=RepoEndpoint(root=repo, native_root=str(repo)),
+        source_git=GitExecution(command_argv=("git",), repo_native_root=str(repo)),
+        destination_git=GitExecution(command_argv=("git",), repo_native_root=str(repo)),
+        transfer=TransferExecution(
+            command_argv=("rsync",),
+            source_root=str(repo),
+            dest_root=str(repo),
+        ),
     )
 
 
