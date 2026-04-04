@@ -152,6 +152,9 @@ def test_format_status_shows_unified_view() -> None:
 
     assert "fetch" in rendered
     assert "file.py" in rendered
+    assert "Current repo: clean" in rendered
+    assert "Peer repo: 1 dirty file(s)" in rendered
+    assert "Synced: none" in rendered
     assert "Conflicts: none" in rendered
     assert "HEAD relation:       same" in rendered
 
@@ -185,9 +188,126 @@ def test_format_status_colorizes_sections_for_interactive_terminals(
     )
 
     assert "\x1b[" in rendered
-    assert _strip_ansi(rendered).count("Source: 1 dirty file(s)") == 1
-    assert _strip_ansi(rendered).count("Destination: clean") == 1
+    assert _strip_ansi(rendered).count("Current repo: clean") == 1
+    assert _strip_ansi(rendered).count("Peer repo: 1 dirty file(s)") == 1
+    assert _strip_ansi(rendered).count("Synced: none") == 1
     assert _strip_ansi(rendered).count("Conflicts: none") == 1
+
+
+def test_format_status_colorizes_git_status_cells_by_meaning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = SourceState(
+        head="abc",
+        entries=(
+            StatusRecord(raw_xy="M ", path="staged-mod.py", orig_path=None, kind=StatusKind.STAGED),
+            StatusRecord(
+                raw_xy=" M",
+                path="unstaged-mod.py",
+                orig_path=None,
+                kind=StatusKind.UNSTAGED,
+            ),
+            StatusRecord(raw_xy="A ", path="added.py", orig_path=None, kind=StatusKind.ADDED),
+            StatusRecord(raw_xy=" D", path="deleted.py", orig_path=None, kind=StatusKind.DELETED),
+            StatusRecord(raw_xy="??", path="new.py", orig_path=None, kind=StatusKind.NEW),
+        ),
+    )
+    dest = DestinationState(head="abc", modified_count=0, staged_count=0, untracked_count=0)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+
+    rendered = format_status(
+        direction=SyncDirection.SEND,
+        source_state=source,
+        destination_state=dest,
+        conflicts=(),
+        head_relation="same",
+        risk_level="low",
+        orphaned_count=0,
+    )
+
+    assert "\x1b[38;5;214mM\x1b[0m " in rendered
+    assert " \x1b[33mM\x1b[0m" in rendered
+    assert "\x1b[32mA\x1b[0m " in rendered
+    assert " \x1b[31mD\x1b[0m" in rendered
+    assert "\x1b[35m?\x1b[0m\x1b[35m?\x1b[0m" in rendered
+
+
+def test_format_status_moves_identical_overlaps_into_synced_section() -> None:
+    source = SourceState(
+        head="abc",
+        entries=(
+            StatusRecord(raw_xy=" M", path="shared.py", orig_path=None, kind=StatusKind.UNSTAGED),
+            StatusRecord(raw_xy="??", path="source-only.py", orig_path=None, kind=StatusKind.NEW),
+        ),
+    )
+    dest = DestinationState(
+        head="abc",
+        modified_count=1,
+        staged_count=0,
+        untracked_count=1,
+        entries=(
+            StatusRecord(raw_xy="M ", path="shared.py", orig_path=None, kind=StatusKind.STAGED),
+            StatusRecord(raw_xy="??", path="dest-only.py", orig_path=None, kind=StatusKind.NEW),
+        ),
+    )
+
+    rendered = format_status(
+        direction=SyncDirection.FETCH,
+        source_state=source,
+        destination_state=dest,
+        conflicts=(),
+        head_relation="same",
+        risk_level="low",
+        orphaned_count=0,
+    )
+
+    assert "Current repo: 1 dirty file(s)" in rendered
+    assert "Peer repo: 1 dirty file(s)" in rendered
+    assert "Synced: 1 file(s) already matched on both sides" in rendered
+    assert "Relative path" in rendered
+    assert "Current : Peer" in rendered
+    assert "source-only.py" in rendered
+    assert "dest-only.py" in rendered
+    assert "shared.py" in rendered
+    assert "[M ]:[ M]" in rendered
+
+
+def test_format_status_lists_current_repo_before_peer_repo() -> None:
+    source = SourceState(
+        head="abc",
+        entries=(
+            StatusRecord(raw_xy="??", path="peer-only.py", orig_path=None, kind=StatusKind.NEW),
+        ),
+    )
+    dest = DestinationState(
+        head="abc",
+        modified_count=1,
+        staged_count=0,
+        untracked_count=0,
+        entries=(
+            StatusRecord(
+                raw_xy=" M",
+                path="current-only.py",
+                orig_path=None,
+                kind=StatusKind.UNSTAGED,
+            ),
+        ),
+    )
+
+    rendered = format_status(
+        direction=SyncDirection.FETCH,
+        source_state=source,
+        destination_state=dest,
+        conflicts=(),
+        head_relation="same",
+        risk_level="low",
+        orphaned_count=0,
+    )
+
+    assert rendered.index("Current repo: 1 dirty file(s)") < rendered.index(
+        "Peer repo: 1 dirty file(s)"
+    )
 
 
 def test_status_to_json_matches_declared_schema() -> None:

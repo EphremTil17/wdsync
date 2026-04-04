@@ -9,6 +9,8 @@ from wdsync.core.codec import (
     delete_outcomes_to_dict,
     destination_state_from_object,
     destination_state_to_dict,
+    fingerprints_from_object,
+    fingerprints_to_dict,
     manifest_from_object,
     manifest_to_dict,
     protocol_identity_from_object,
@@ -23,6 +25,7 @@ from wdsync.core.models import (
     DeleteOutcome,
     DestinationState,
     Identity,
+    PathFingerprint,
     PeerConfig,
     RestoreResult,
     RuntimePreferences,
@@ -157,6 +160,32 @@ def test_manifest_roundtrip_preserves_untracked_paths() -> None:
 def test_manifest_from_object_rejects_non_list_untracked() -> None:
     with pytest.raises(ConfigValidationError, match="paths must be a list"):
         manifest_from_object({"paths": "scratch.txt"}, context="rpc")
+
+
+def test_fingerprints_roundtrip_preserves_null_and_oid_values() -> None:
+    fingerprints = (
+        PathFingerprint(path="tracked.txt", object_id="abc123"),
+        PathFingerprint(path="deleted.txt", object_id=None),
+    )
+
+    loaded = fingerprints_from_object(fingerprints_to_dict(fingerprints), context="rpc")
+
+    assert loaded == fingerprints
+
+
+def test_fingerprints_from_object_rejects_bad_object_id_type() -> None:
+    with pytest.raises(ConfigValidationError, match="object_id must be a string or null"):
+        fingerprints_from_object(
+            {
+                "fingerprints": [
+                    {
+                        "path": "tracked.txt",
+                        "object_id": 123,
+                    }
+                ]
+            },
+            context="rpc",
+        )
 
 
 def test_protocol_identity_from_object_wraps_validation_errors() -> None:

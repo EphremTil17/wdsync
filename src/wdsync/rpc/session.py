@@ -5,6 +5,7 @@ from typing import cast
 from wdsync.core.codec import (
     delete_outcomes_from_object,
     destination_state_from_object,
+    fingerprints_from_object,
     manifest_from_object,
     restore_result_from_object,
 )
@@ -13,6 +14,7 @@ from wdsync.core.models import (
     DeleteOutcome,
     DestinationState,
     HeadRelation,
+    PathFingerprint,
     PeerConfig,
     RestoreResult,
 )
@@ -22,6 +24,7 @@ from wdsync.core.protocol import (
     RpcResponse,
     build_compare_heads_request,
     build_delete_request,
+    build_fingerprint_paths_request,
     build_handshake_request,
     build_read_manifest_request,
     build_restore_request,
@@ -68,6 +71,21 @@ class PeerSession:
             return HeadRelation(raw_relation)
         except ValueError as exc:
             raise PeerConnectionError("wdsync: peer compare_heads response is malformed") from exc
+
+    def fingerprint_paths(self, paths: tuple[str, ...]) -> dict[str, str | None]:
+        if not paths:
+            return {}
+        response = self._client.send(
+            build_fingerprint_paths_request(
+                repo_root_native=self._peer.root_native,
+                paths=paths,
+            )
+        )
+        try:
+            fingerprints = fingerprints_from_object(response["data"], context="RPC response")
+        except ConfigValidationError as exc:
+            raise PeerConnectionError("wdsync: peer fingerprint response is malformed") from exc
+        return _fingerprint_map(fingerprints)
 
     def read_manifest(self) -> frozenset[str]:
         response = self._client.send(
@@ -140,3 +158,7 @@ def capabilities_from_object(raw: object) -> frozenset[str]:
             raise PeerConnectionError("wdsync: peer handshake capabilities are malformed")
         capabilities.append(item)
     return frozenset(capabilities)
+
+
+def _fingerprint_map(fingerprints: tuple[PathFingerprint, ...]) -> dict[str, str | None]:
+    return {fingerprint.path: fingerprint.object_id for fingerprint in fingerprints}

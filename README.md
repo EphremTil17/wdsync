@@ -118,9 +118,10 @@ wdsync/
 | ----------------------------------------------------- | -------------------------------------------------- |
 | File modified in source only                          | Copied to destination                              |
 | File modified in destination only                     | Not touched (destination changes are preserved)    |
-| File modified on both sides                           | **Conflict** — skipped unless `--force` is used    |
+| File modified on both sides with different content    | **Conflict** — skipped unless `--force` is used    |
+| File modified on both sides with identical content    | Reported as already synced on both sides           |
 | File deleted in source (tracked)                      | Deleted from destination                           |
-| File deleted in source (untracked, previously synced) | Deleted from destination via pair-owned manifest tracking |
+| File deleted in source (mirrored, previously synced)  | Reconciled from destination via pair-owned mirrored-path tracking |
 | File deleted then restored in source                  | Restored in destination via `git restore`          |
 | Deleted file has local changes in destination         | Skipped to avoid data loss                         |
 | Permission denied on deletion (WSL path)              | Prompts for `sudo` retry                           |
@@ -185,11 +186,12 @@ Each side reads its own dirty state using its native git (`git` on WSL,
 stores peer configuration on both repos, and either repo can then run
 `status`, `fetch`, or `send`. Repo inspection and peer-side delete/restore run
 natively through RPC, while file transfer still uses rsync over translated peer
-paths. Conflicts (files dirty on both sides) are detected and blocked by
-default — use `--force` to override. State lives under `.git/wdsync/`, with a
-repo-root `.wdsync` marker for visibility. `disconnect` removes only the peer
-link; `deinit` removes local wdsync state entirely. See the Sync Rules table
-above for full details.
+paths. Conflicts are refined beyond simple path overlap: if the same dirty path
+exists on both sides but Git-normalized content fingerprints match, wdsync
+shows it as already synced on both sides instead of a true conflict. State
+lives under `.git/wdsync/`, with a repo-root `.wdsync` marker for visibility.
+`disconnect` removes only the peer link; `deinit` removes local wdsync state
+entirely. See the Sync Rules table above for full details.
 
 ## Limitations
 

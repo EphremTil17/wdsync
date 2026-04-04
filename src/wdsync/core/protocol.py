@@ -6,11 +6,18 @@ from typing import TypedDict
 from wdsync.core.codec import (
     delete_outcomes_to_dict,
     destination_state_to_dict,
+    fingerprints_to_dict,
     identity_to_dict,
     manifest_to_dict,
     restore_result_to_dict,
 )
-from wdsync.core.models import DeleteOutcome, DestinationState, Identity, RestoreResult
+from wdsync.core.models import (
+    DeleteOutcome,
+    DestinationState,
+    Identity,
+    PathFingerprint,
+    RestoreResult,
+)
 
 PROTOCOL_VERSION = 1
 
@@ -20,6 +27,7 @@ class RpcMethod(StrEnum):
     LOCATE_REPO = "locate_repo"
     CONFIGURE_PEER = "configure_peer"
     STATUS = "status"
+    FINGERPRINT_PATHS = "fingerprint_paths"
     READ_MANIFEST = "read_manifest"
     WRITE_MANIFEST = "write_manifest"
     DELETE = "delete"
@@ -44,6 +52,7 @@ HANDSHAKE_CAPABILITIES: tuple[RpcMethod, ...] = (
     RpcMethod.LOCATE_REPO,
     RpcMethod.CONFIGURE_PEER,
     RpcMethod.STATUS,
+    RpcMethod.FINGERPRINT_PATHS,
     RpcMethod.READ_MANIFEST,
     RpcMethod.WRITE_MANIFEST,
     RpcMethod.DELETE,
@@ -153,6 +162,26 @@ def build_status_response(state: DestinationState) -> RpcResponse:
         "version": PROTOCOL_VERSION,
         "ok": True,
         "data": destination_state_to_dict(state),
+        "error": None,
+    }
+
+
+def build_fingerprint_paths_request(*, repo_root_native: str, paths: tuple[str, ...]) -> RpcRequest:
+    return {
+        "version": PROTOCOL_VERSION,
+        "method": RpcMethod.FINGERPRINT_PATHS,
+        "args": {
+            "repo_root_native": repo_root_native,
+            "paths": list(paths),
+        },
+    }
+
+
+def build_fingerprint_paths_response(fingerprints: tuple[PathFingerprint, ...]) -> RpcResponse:
+    return {
+        "version": PROTOCOL_VERSION,
+        "ok": True,
+        "data": fingerprints_to_dict(fingerprints),
         "error": None,
     }
 

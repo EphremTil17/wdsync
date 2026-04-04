@@ -12,10 +12,10 @@ wdsync ships a complete WSL/Windows sync workflow:
 - Identity-based repo linking via remote URL or root commit SHA
 - Bilateral RPC-based peer discovery and peer configuration
 - Environment-aware peer discovery with layered search (cached root, cwd, common dirs)
-- Two-way sync with conflict detection and `--force` override
+- Two-way sync with fingerprint-refined conflict detection and `--force` override
 - Deletion propagation with sudo escalation and destination-modified guard
 - Reconciliation of previously deleted files via `git restore`
-- Untracked file manifest for orphan cleanup
+- Pair-owned mirrored-path manifest for cleanup and reconciliation
 - Structured logging via loguru (console + file)
 - JSON output for `status`, `fetch`, and `send`
 - Runtime overrides for WSL distro and peer launch commands
@@ -25,13 +25,13 @@ wdsync ships a complete WSL/Windows sync workflow:
 
 | Feature | Version | Notes |
 |---|---|---|
-| Deletion propagation | v0.2.0 | Tracked + untracked via manifest |
+| Deletion propagation | v0.2.0 | Tracked + mirrored dirty paths via manifest |
 | HEAD mismatch warning | v0.1.0 | Part of doctor/status |
 | Dirty destination warning | v0.1.0 | Part of doctor/status |
 | JSON output | v0.1.0 | `--json` on preview/sync |
 | Two-way sync (fetch/send) | v0.4.0 | DirectionConfig abstraction |
 | Unified status command | v0.4.0 | Absorbed preview + doctor |
-| Conflict detection | v0.4.0 | Set intersection + `--force` |
+| Conflict detection | v0.4.0 | Path overlap refined by Git-native fingerprints + `--force` |
 | Structured logging | v0.4.0 | loguru, two-stage (console + file) |
 | RPC peer connect | v0.5.0 | Handshake + locate_repo + configure_peer + identity match |
 | Windows-initiated connect | v0.5.0 | `wsl.exe --exec wdsync rpc` path |

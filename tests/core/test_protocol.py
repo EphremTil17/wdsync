@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from wdsync.core.models import DestinationState, Identity, RestoreResult
+from wdsync.core.models import DestinationState, Identity, PathFingerprint, RestoreResult
 from wdsync.core.protocol import (
     HANDSHAKE_CAPABILITIES,
     PROTOCOL_VERSION,
@@ -10,6 +10,8 @@ from wdsync.core.protocol import (
     build_delete_request,
     build_delete_response,
     build_error_response,
+    build_fingerprint_paths_request,
+    build_fingerprint_paths_response,
     build_handshake_request,
     build_handshake_response,
     build_locate_repo_request,
@@ -100,6 +102,10 @@ def test_build_configure_peer_request_and_response() -> None:
 
 def test_build_status_delete_and_restore_requests() -> None:
     status_req = build_status_request(repo_root_native="/repo")
+    fingerprint_req = build_fingerprint_paths_request(
+        repo_root_native="/repo",
+        paths=("a.txt", "b.txt"),
+    )
     read_manifest_req = build_read_manifest_request(repo_root_native="/repo")
     write_manifest_req = build_write_manifest_request(
         repo_root_native="/repo",
@@ -110,6 +116,8 @@ def test_build_status_delete_and_restore_requests() -> None:
 
     assert status_req["method"] == RpcMethod.STATUS
     assert status_req["args"]["repo_root_native"] == "/repo"
+    assert fingerprint_req["method"] == RpcMethod.FINGERPRINT_PATHS
+    assert fingerprint_req["args"]["paths"] == ["a.txt", "b.txt"]
     assert read_manifest_req["method"] == RpcMethod.READ_MANIFEST
     assert read_manifest_req["args"]["repo_root_native"] == "/repo"
     assert write_manifest_req["method"] == RpcMethod.WRITE_MANIFEST
@@ -133,11 +141,21 @@ def test_build_status_delete_and_restore_responses() -> None:
         )
     )
     read_manifest_resp = build_read_manifest_response(frozenset({"a.txt"}))
+    fingerprint_resp = build_fingerprint_paths_response(
+        (
+            PathFingerprint(path="a.txt", object_id="abc123"),
+            PathFingerprint(path="gone.txt", object_id=None),
+        )
+    )
     write_manifest_resp = build_write_manifest_response()
     delete_resp = build_delete_response(())
     restore_resp = build_restore_response(result=RestoreResult(restored_count=0, warnings=()))
 
     assert status_resp["data"]["modified_count"] == 1
+    assert fingerprint_resp["data"]["fingerprints"] == [
+        {"path": "a.txt", "object_id": "abc123"},
+        {"path": "gone.txt", "object_id": None},
+    ]
     assert read_manifest_resp["data"]["paths"] == ["a.txt"]
     assert write_manifest_resp["data"]["saved"] is True
     assert delete_resp["data"]["outcomes"] == []
@@ -158,6 +176,7 @@ def test_rpc_method_enum_values() -> None:
     assert RpcMethod.LOCATE_REPO == "locate_repo"
     assert RpcMethod.CONFIGURE_PEER == "configure_peer"
     assert RpcMethod.STATUS == "status"
+    assert RpcMethod.FINGERPRINT_PATHS == "fingerprint_paths"
     assert RpcMethod.READ_MANIFEST == "read_manifest"
     assert RpcMethod.WRITE_MANIFEST == "write_manifest"
     assert RpcMethod.DELETE == "delete"

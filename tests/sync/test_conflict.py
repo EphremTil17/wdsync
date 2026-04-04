@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from wdsync.core.models import DestinationState, SourceState, StatusKind, StatusRecord
-from wdsync.sync.conflict import detect_conflicts
+from wdsync.sync.conflict import detect_conflicts, filter_equivalent_conflicts
 
 
 def _source_state(*entries: tuple[str, str]) -> SourceState:
@@ -68,3 +68,33 @@ def test_multiple_conflicts_sorted() -> None:
     assert len(conflicts) == 2
     assert conflicts[0].path == "a.txt"
     assert conflicts[1].path == "z.txt"
+
+
+def test_filter_equivalent_conflicts_suppresses_same_content() -> None:
+    conflicts = detect_conflicts(
+        _source_state(("shared.txt", " M")),
+        _dest_state(("shared.txt", " M")),
+    )
+
+    filtered = filter_equivalent_conflicts(
+        conflicts,
+        source_fingerprints={"shared.txt": "abc123"},
+        dest_fingerprints={"shared.txt": "abc123"},
+    )
+
+    assert filtered == ()
+
+
+def test_filter_equivalent_conflicts_keeps_real_difference() -> None:
+    conflicts = detect_conflicts(
+        _source_state(("shared.txt", " M")),
+        _dest_state(("shared.txt", " M")),
+    )
+
+    filtered = filter_equivalent_conflicts(
+        conflicts,
+        source_fingerprints={"shared.txt": "abc123"},
+        dest_fingerprints={"shared.txt": "def456"},
+    )
+
+    assert [conflict.path for conflict in filtered] == ["shared.txt"]

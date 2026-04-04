@@ -8,6 +8,7 @@ from wdsync.core.models import (
     DeleteOutcome,
     DestinationState,
     Identity,
+    PathFingerprint,
     PeerConfig,
     RestoreResult,
     RuntimePreferences,
@@ -238,6 +239,49 @@ def manifest_from_object(raw: object, *, context: str) -> frozenset[str]:
         raise ConfigValidationError(f"wdsync: {context} has invalid manifest payload")
     data = cast(dict[str, Any], raw)
     return frozenset(_string_list_from_value(data.get("paths"), context=f"{context} paths"))
+
+
+def fingerprints_to_dict(fingerprints: tuple[PathFingerprint, ...]) -> dict[str, object]:
+    return {
+        "fingerprints": [
+            {
+                "path": fingerprint.path,
+                "object_id": fingerprint.object_id,
+            }
+            for fingerprint in fingerprints
+        ]
+    }
+
+
+def fingerprints_from_object(raw: object, *, context: str) -> tuple[PathFingerprint, ...]:
+    if not isinstance(raw, dict):
+        raise ConfigValidationError(f"wdsync: {context} has invalid fingerprint payload")
+    data = cast(dict[str, Any], raw)
+    raw_items = data.get("fingerprints", [])
+    if not isinstance(raw_items, list):
+        raise ConfigValidationError(f"wdsync: {context} fingerprints must be a list")
+    fingerprints: list[PathFingerprint] = []
+    for index, raw_item in enumerate(cast(list[Any], raw_items)):
+        if not isinstance(raw_item, dict):
+            raise ConfigValidationError(
+                f"wdsync: {context} fingerprints[{index}] has invalid structure"
+            )
+        item = cast(dict[str, Any], raw_item)
+        object_id = item.get("object_id")
+        if object_id is not None and not isinstance(object_id, str):
+            raise ConfigValidationError(
+                f"wdsync: {context} fingerprints[{index}].object_id must be a string or null"
+            )
+        fingerprints.append(
+            PathFingerprint(
+                path=_required_string(
+                    item.get("path"),
+                    context=f"{context} fingerprints[{index}].path",
+                ),
+                object_id=object_id,
+            )
+        )
+    return tuple(fingerprints)
 
 
 def delete_outcomes_to_dict(outcomes: tuple[DeleteOutcome, ...]) -> dict[str, object]:

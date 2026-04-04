@@ -6,9 +6,10 @@ from wdsync.core.exceptions import PeerConnectionError
 from wdsync.core.models import DestinationState, DirectionConfig, SourceState, SyncContext
 from wdsync.core.runner import CommandRunner
 from wdsync.git.dest import read_destination_state
+from wdsync.git.fingerprint import read_repo_path_fingerprints
 from wdsync.git.source import read_source_state
 from wdsync.rpc.session import PeerSession
-from wdsync.sync.conflict import detect_conflicts
+from wdsync.sync.conflict import detect_conflicts, filter_equivalent_conflicts
 from wdsync.sync.doctor import build_doctor_report
 from wdsync.sync.manifest import read_manifest
 
@@ -23,6 +24,25 @@ def build_sync_context(
     source_state = _read_source_state(dconfig, runner, peer_session=peer_session)
     destination_state = _read_destination_state(dconfig, runner, peer_session=peer_session)
     conflicts = detect_conflicts(source_state, destination_state)
+    if conflicts:
+        overlap_paths = tuple(conflict.path for conflict in conflicts)
+        source_fingerprints = _read_source_fingerprints(
+            dconfig,
+            runner,
+            overlap_paths,
+            peer_session=peer_session,
+        )
+        destination_fingerprints = _read_destination_fingerprints(
+            dconfig,
+            runner,
+            overlap_paths,
+            peer_session=peer_session,
+        )
+        conflicts = filter_equivalent_conflicts(
+            conflicts,
+            source_fingerprints=source_fingerprints,
+            dest_fingerprints=destination_fingerprints,
+        )
     doctor_report = build_doctor_report(
         dconfig,
         source_state,
@@ -72,3 +92,47 @@ def _read_destination_state(
     if peer_session is None:
         raise PeerConnectionError("wdsync: peer session is required when destination is remote")
     return peer_session.status()
+
+
+def _read_source_fingerprints(
+    dconfig: DirectionConfig,
+    runner: CommandRunner,
+    paths: tuple[str, ...],
+    *,
+    peer_session: PeerSession | None,
+) -> dict[str, str | None]:
+    if dconfig.source_is_local:
+        return {
+            fingerprint.path: fingerprint.object_id
+            for fingerprint in read_repo_path_fingerprints(
+                dconfig.source_git_command(),
+                dconfig.source_root,
+                runner,
+                paths,
+            )
+        }
+    if peer_session is None:
+        raise PeerConnectionError("wdsync: peer session is required when source is remote")
+    return peer_session.fingerprint_paths(paths)
+
+
+def _read_destination_fingerprints(
+    dconfig: DirectionConfig,
+    runner: CommandRunner,
+    paths: tuple[str, ...],
+    *,
+    peer_session: PeerSession | None,
+) -> dict[str, str | None]:
+    if dconfig.destination_is_local:
+        return {
+            fingerprint.path: fingerprint.object_id
+            for fingerprint in read_repo_path_fingerprints(
+                dconfig.dest_git_command(),
+                dconfig.dest_root,
+                runner,
+                paths,
+            )
+        }
+    if peer_session is None:
+        raise PeerConnectionError("wdsync: peer session is required when destination is remote")
+    return peer_session.fingerprint_paths(paths)

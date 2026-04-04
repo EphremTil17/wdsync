@@ -269,6 +269,12 @@ class ConflictRecord:
 
 
 @dataclass(frozen=True)
+class PathFingerprint:
+    path: str
+    object_id: str | None
+
+
+@dataclass(frozen=True)
 class DeleteOutcome:
     path: str
     deleted: bool
@@ -320,6 +326,11 @@ class ConflictJSON(TypedDict):
     path: str
     source_xy: str
     dest_xy: str
+
+
+class PathFingerprintJSON(TypedDict):
+    path: str
+    object_id: str | None
 
 
 class StatusRecordJSON(TypedDict):

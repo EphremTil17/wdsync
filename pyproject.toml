@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 # Core package/runtime contract
 name = "wdsync"
-version = "0.6.0"
+version = "0.6.1"
 description = "Mirror dirty files between matching Windows and WSL Git repositories."
 requires-python = ">=3.11"
 dependencies = [

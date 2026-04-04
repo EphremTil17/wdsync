@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from wdsync.core.models import ConflictRecord, DestinationState, SourceState
 
 
@@ -13,4 +15,17 @@ def detect_conflicts(
     return tuple(
         ConflictRecord(path=p, source_xy=source_map[p], dest_xy=dest_map[p])
         for p in sorted(overlapping)
+    )
+
+
+def filter_equivalent_conflicts(
+    conflicts: tuple[ConflictRecord, ...],
+    *,
+    source_fingerprints: Mapping[str, str | None],
+    dest_fingerprints: Mapping[str, str | None],
+) -> tuple[ConflictRecord, ...]:
+    return tuple(
+        conflict
+        for conflict in conflicts
+        if source_fingerprints.get(conflict.path) != dest_fingerprints.get(conflict.path)
     )

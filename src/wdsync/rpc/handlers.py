@@ -30,6 +30,7 @@ from wdsync.core.protocol import (
     build_configure_peer_response,
     build_delete_response,
     build_error_response,
+    build_fingerprint_paths_response,
     build_handshake_response,
     build_locate_repo_response,
     build_read_manifest_response,
@@ -39,6 +40,7 @@ from wdsync.core.protocol import (
 )
 from wdsync.core.runner import CommandRunner
 from wdsync.git.dest import read_repo_destination_state
+from wdsync.git.fingerprint import read_repo_path_fingerprints
 from wdsync.rpc.discovery import locate_matching_repo
 from wdsync.sync.deleter import delete_files
 from wdsync.sync.doctor import determine_head_relation_from_command
@@ -61,6 +63,8 @@ def handle_rpc_request(request: dict[str, object], runner: CommandRunner) -> Rpc
         return _handle_configure_peer(request, runner)
     if method == RpcMethod.STATUS:
         return _handle_status(request, runner)
+    if method == RpcMethod.FINGERPRINT_PATHS:
+        return _handle_fingerprint_paths(request, runner)
     if method == RpcMethod.READ_MANIFEST:
         return _handle_read_manifest(request, runner)
     if method == RpcMethod.WRITE_MANIFEST:
@@ -136,6 +140,16 @@ def _handle_status(request: dict[str, object], runner: CommandRunner) -> RpcResp
         repo_root = _parse_repo_root_arg(request, method_name="status")
         state = _read_local_repo_status(repo_root, runner)
         return build_status_response(state)
+    except WdSyncError as exc:
+        return build_error_response(str(exc))
+
+
+def _handle_fingerprint_paths(request: dict[str, object], runner: CommandRunner) -> RpcResponse:
+    try:
+        repo_root, paths = _parse_repo_paths_args(request, method_name="fingerprint_paths")
+        command = [*local_git_command(detect_environment()), "-C", str(repo_root)]
+        fingerprints = read_repo_path_fingerprints(command, repo_root, runner, paths)
+        return build_fingerprint_paths_response(fingerprints)
     except WdSyncError as exc:
         return build_error_response(str(exc))
 

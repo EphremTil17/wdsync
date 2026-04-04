@@ -57,6 +57,19 @@ def test_peer_session_roundtrips_status_manifest_delete_restore_and_compare_head
         "            },\n"
         "            'error': None,\n"
         "        }\n"
+        "    elif method == 'fingerprint_paths':\n"
+        "        resp = {\n"
+        f"            'version': {PROTOCOL_VERSION},\n"
+        "            'ok': True,\n"
+        "            'data': {'fingerprints': [\n"
+        "                {\n"
+        "                    'path': path,\n"
+        "                    'object_id': ('oid-' + path) if path != 'gone.txt' else None,\n"
+        "                }\n"
+        "                for path in req['args']['paths']\n"
+        "            ]},\n"
+        "            'error': None,\n"
+        "        }\n"
         "    elif method == 'read_manifest':\n"
         "        resp = {\n"
         f"            'version': {PROTOCOL_VERSION},\n"
@@ -115,6 +128,7 @@ def test_peer_session_roundtrips_status_manifest_delete_restore_and_compare_head
 
     with PeerSession(peer) as session:
         state = session.status()
+        fingerprints = session.fingerprint_paths(("dirty.txt", "gone.txt"))
         initial_manifest = session.read_manifest()
         session.write_manifest(frozenset({"after.txt", "nested/new.txt"}))
         updated_manifest = session.read_manifest()
@@ -125,6 +139,7 @@ def test_peer_session_roundtrips_status_manifest_delete_restore_and_compare_head
     assert state.head == "abc123"
     assert state.modified_count == 1
     assert state.untracked_count == 1
+    assert fingerprints == {"dirty.txt": "oid-dirty.txt", "gone.txt": None}
     assert initial_manifest == frozenset({"before.txt"})
     assert updated_manifest == frozenset({"after.txt", "nested/new.txt"})
     assert delete_outcomes[0].path == "gone.txt"
@@ -224,3 +239,38 @@ def test_peer_session_rejects_malformed_manifest_payload(tmp_path: Path) -> None
     with PeerSession(peer) as session:
         with pytest.raises(PeerConnectionError, match="peer manifest response is malformed"):
             session.read_manifest()
+
+
+def test_peer_session_rejects_malformed_fingerprint_payload(tmp_path: Path) -> None:
+    capabilities = [capability.value for capability in HANDSHAKE_CAPABILITIES]
+    script = _write_script(
+        tmp_path / "bad_fingerprint.py",
+        "import json, sys\n"
+        f"caps = {capabilities!r}\n"
+        "for raw in sys.stdin:\n"
+        "    req = json.loads(raw)\n"
+        "    if req['method'] == 'handshake':\n"
+        "        resp = {\n"
+        f"            'version': {PROTOCOL_VERSION},\n"
+        "            'ok': True,\n"
+        f"            'data': {{'protocol_version': {PROTOCOL_VERSION}, 'capabilities': caps}},\n"
+        "            'error': None,\n"
+        "        }\n"
+        "    else:\n"
+        "        resp = {\n"
+        f"            'version': {PROTOCOL_VERSION},\n"
+        "            'ok': True,\n"
+        "            'data': {'fingerprints': 'bad'},\n"
+        "            'error': None,\n"
+        "        }\n"
+        "    print(json.dumps(resp), flush=True)\n",
+    )
+    peer = PeerConfig(
+        command_argv=(sys.executable, str(script)),
+        root=Path("/tmp/peer"),
+        root_native="/tmp/peer",
+    )
+
+    with PeerSession(peer) as session:
+        with pytest.raises(PeerConnectionError, match="peer fingerprint response is malformed"):
+            session.fingerprint_paths(("tracked.txt",))

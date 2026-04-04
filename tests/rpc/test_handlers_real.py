@@ -45,6 +45,33 @@ def test_status_handler_reports_real_repo_state(
     assert response["data"]["untracked_count"] == 1
 
 
+def test_fingerprint_handler_reports_git_normalized_worktree_content(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+) -> None:
+    repo = repo_factory("repo", files={"tracked.txt": "base\n", "deleted.txt": "gone\n"})
+    (repo / "tracked.txt").write_text("dirty\n", encoding="utf-8")
+    (repo / "untracked.txt").write_text("new\n", encoding="utf-8")
+    (repo / "deleted.txt").unlink()
+
+    response = handle_rpc_request(
+        _request(
+            RpcMethod.FINGERPRINT_PATHS,
+            args={
+                "repo_root_native": str(repo),
+                "paths": ["tracked.txt", "untracked.txt", "deleted.txt"],
+            },
+        ),
+        git_runner,
+    )
+
+    assert response["ok"] is True
+    fingerprints = {item["path"]: item["object_id"] for item in response["data"]["fingerprints"]}  # type: ignore[index]
+    assert fingerprints["tracked.txt"]
+    assert fingerprints["untracked.txt"]
+    assert fingerprints["deleted.txt"] is None
+
+
 def test_delete_handler_deletes_clean_paths_and_skips_edge_cases(
     repo_factory: Callable[..., Path],
     git_runner: CommandRunner,
@@ -209,6 +236,13 @@ def test_handlers_reject_malformed_rpc_arguments(
         ),
         git_runner,
     )
+    fingerprint_response = handle_rpc_request(
+        _request(
+            RpcMethod.FINGERPRINT_PATHS,
+            args={"repo_root_native": str(repo), "paths": ["ok.txt", 3]},
+        ),
+        git_runner,
+    )
 
     assert status_response["ok"] is False
     assert "repo_root_native" in (status_response["error"] or "")
@@ -218,3 +252,5 @@ def test_handlers_reject_malformed_rpc_arguments(
     assert "source_head" in (compare_response["error"] or "")
     assert manifest_response["ok"] is False
     assert "requires paths" in (manifest_response["error"] or "")
+    assert fingerprint_response["ok"] is False
+    assert "paths must be non-empty strings" in (fingerprint_response["error"] or "")

@@ -189,7 +189,7 @@ All wdsync state lives under `.git/wdsync/` to keep the repo root clean:
 ```
 .git/wdsync/
 ├── config.json         # Identity, peer command, connection state
-├── manifest.json       # Pair-owned untracked mirror state (for orphan cleanup)
+├── manifest.json       # Pair-owned mirrored-path state (for cleanup/reconcile)
 └── wdsync.log          # Application log (rotated at 5MB, 3 retained)
 ```
 
@@ -204,7 +204,7 @@ note pointing to the config location.
 | Visibility | `.wdsync` at repo root | Users can see the repo is linked. Easy to discover. |
 | Implementation details | `.git/wdsync/config.json` | No `.gitignore` entry needed. Invisible to `git status`. |
 | Logs | `.git/wdsync/wdsync.log` | Same directory. One `cat` to debug. |
-| Manifest | `.git/wdsync/manifest.json` | Keeps pair-owned untracked mirror state co-located. |
+| Manifest | `.git/wdsync/manifest.json` | Keeps pair-owned mirrored-path state co-located. |
 
 ### Config Format
 
@@ -288,9 +288,10 @@ Rotation at 5MB with 3 retained files prevents unbounded growth.
 |---|---|
 | File modified in source only | Copied to destination |
 | File modified in destination only | Not touched (destination changes preserved) |
-| File modified on both sides | **Conflict** — skipped unless `--force` |
+| File modified on both sides with different content | **Conflict** — skipped unless `--force` |
+| File modified on both sides with identical content | Reported as already synced on both sides |
 | File deleted in source (tracked) | Deleted from destination through peer-native delete logic |
-| File deleted in source (untracked, previously synced) | Deleted via pair-owned manifest tracking mirrored on both repos |
+| File deleted in source (mirrored, previously synced) | Reconciled via pair-owned mirrored-path tracking on both repos |
 | File deleted then restored in source | Restored in destination via environment-appropriate `git restore` command |
 | Deleted file has local changes in destination | Skipped to avoid data loss |
 | Permission denied on deletion | WSL destinations may prompt for `sudo`; Windows-path failures are skipped |
@@ -301,14 +302,23 @@ Rotation at 5MB with 3 retained files prevents unbounded growth.
 
 ## Conflict Detection
 
-A conflict exists when the same file path appears in both the source and
-destination dirty sets. Detection is a simple set intersection:
+A candidate conflict starts when the same file path appears in both the source
+and destination dirty sets. That overlap is then refined by comparing
+Git-normalized fingerprints of the current worktree content on each side. Only
+paths whose fingerprints differ remain true conflicts:
 
 ```
 source_dirty = {entry.path for entry in source_state.entries}
 dest_dirty   = {entry.path for entry in dest_state.entries}
-conflicts    = source_dirty & dest_dirty
+overlap      = source_dirty & dest_dirty
+conflicts    = {
+  path for path in overlap
+  if source_fingerprint(path) != dest_fingerprint(path)
+}
 ```
+
+If the fingerprints match, the path is shown in the `Synced` bucket in status
+output instead of being treated as a conflict.
 
 ### Conflict Resolution
 

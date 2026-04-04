@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from typing import NamedTuple
 
 from wdsync.core.models import (
     ConflictRecord,
@@ -10,6 +11,7 @@ from wdsync.core.models import (
     PreviewRowJSON,
     SourceState,
     StatusJSON,
+    StatusRecord,
     SyncDirection,
     SyncJSON,
     SyncPlan,
@@ -22,7 +24,16 @@ _ANSI_RESET = "\x1b[0m"
 _ANSI_CYAN = "\x1b[36m"
 _ANSI_GREEN = "\x1b[32m"
 _ANSI_YELLOW = "\x1b[33m"
+_ANSI_RED = "\x1b[31m"
+_ANSI_MAGENTA = "\x1b[35m"
+_ANSI_ORANGE = "\x1b[38;5;214m"
 _ANSI_DIM = "\x1b[2m"
+
+
+class _MatchedStatus(NamedTuple):
+    path: str
+    source_xy: str
+    dest_xy: str
 
 
 def _preview_rows_to_json(plan: SyncPlan) -> list[PreviewRowJSON]:
@@ -126,6 +137,99 @@ def _sync_hint(direction: SyncDirection) -> str:
     return "Run 'wdsync fetch' to sync"
 
 
+def _current_peer_entries(
+    direction: SyncDirection,
+    *,
+    source_only: tuple[StatusRecord, ...],
+    destination_only: tuple[StatusRecord, ...],
+) -> tuple[tuple[StatusRecord, ...], tuple[StatusRecord, ...]]:
+    if direction is SyncDirection.FETCH:
+        return destination_only, source_only
+    return source_only, destination_only
+
+
+def _current_peer_statuses(
+    direction: SyncDirection,
+    *,
+    source_xy: str,
+    dest_xy: str,
+) -> tuple[str, str]:
+    if direction is SyncDirection.FETCH:
+        return dest_xy, source_xy
+    return source_xy, dest_xy
+
+
+def _status_char_ansi(char: str, *, slot: int) -> str | None:
+    if char == "M":
+        return _ANSI_ORANGE if slot == 0 else _ANSI_YELLOW
+    if char == "A":
+        return _ANSI_GREEN
+    if char == "D":
+        return _ANSI_RED
+    if char == "?":
+        return _ANSI_MAGENTA
+    if char == "R":
+        return _ANSI_CYAN
+    if char == "C":
+        return _ANSI_CYAN
+    return None
+
+
+def _format_raw_xy(raw_xy: str) -> str:
+    formatted: list[str] = []
+    for slot, char in enumerate(raw_xy):
+        ansi = _status_char_ansi(char, slot=slot)
+        formatted.append(_colorize(char, ansi) if ansi is not None else char)
+    return "".join(formatted)
+
+
+def _comparison_table_lines(
+    rows: tuple[tuple[str, str, str], ...],
+    *,
+    direction: SyncDirection,
+) -> list[str]:
+    path_header = "Relative path"
+    status_header = "Current : Peer"
+    status_width = len("[MM]:[MM]")
+    path_width = max(len(path_header), *(len(path) for path, _, _ in rows))
+    lines = [f"    {path_header:<{path_width}}  {status_header:>{status_width}}"]
+    for path, source_xy, dest_xy in rows:
+        current_xy, peer_xy = _current_peer_statuses(
+            direction,
+            source_xy=source_xy,
+            dest_xy=dest_xy,
+        )
+        lines.append(
+            f"    {path:<{path_width}}  [{_format_raw_xy(current_xy)}]:[{_format_raw_xy(peer_xy)}]"
+        )
+    return lines
+
+
+def _partition_status_entries(
+    source_state: SourceState,
+    destination_state: DestinationState,
+    conflicts: tuple[ConflictRecord, ...],
+) -> tuple[tuple[StatusRecord, ...], tuple[StatusRecord, ...], tuple[_MatchedStatus, ...]]:
+    source_map = {entry.path: entry for entry in source_state.entries}
+    dest_map = {entry.path: entry for entry in destination_state.entries}
+    overlap_paths = source_map.keys() & dest_map.keys()
+    conflict_paths = {conflict.path for conflict in conflicts}
+    synced_paths = sorted(overlap_paths - conflict_paths)
+    synced = tuple(
+        _MatchedStatus(
+            path=path,
+            source_xy=source_map[path].raw_xy,
+            dest_xy=dest_map[path].raw_xy,
+        )
+        for path in synced_paths
+    )
+    source_only = tuple(entry for entry in source_state.entries if entry.path not in overlap_paths)
+    destination_only = tuple(
+        entry for entry in destination_state.entries if entry.path not in overlap_paths
+    )
+    return source_only, destination_only, synced
+
+
 def format_sync_result(result: SyncResult) -> str:
     has_actions = bool(result.plan.preview_rows or result.restored_count or result.deleted_count)
     if not has_actions:
@@ -171,22 +275,57 @@ def format_status(
         "fetch (Windows → WSL)" if direction is SyncDirection.FETCH else "send (WSL → Windows)"
     )
     lines = [f"wdsync status: {dir_label}", ""]
+    source_only, destination_only, synced = _partition_status_entries(
+        source_state,
+        destination_state,
+        conflicts,
+    )
+    current_only, peer_only = _current_peer_entries(
+        direction,
+        source_only=source_only,
+        destination_only=destination_only,
+    )
 
-    if source_state.entries:
-        lines.append(_colorize(f"  Source: {len(source_state.entries)} dirty file(s)", _ANSI_CYAN))
-        for entry in source_state.entries:
-            lines.append(f"    [{entry.kind.value:<9}] [{entry.raw_xy}]  {entry.path}")
+    if current_only:
+        lines.append(_colorize(f"  Current repo: {len(current_only)} dirty file(s)", _ANSI_CYAN))
+        for entry in current_only:
+            lines.append(
+                f"    [{entry.kind.value:<9}] [{_format_raw_xy(entry.raw_xy)}]  {entry.path}"
+            )
     else:
-        lines.append(_colorize("  Source: clean", _ANSI_CYAN))
+        lines.append(_colorize("  Current repo: clean", _ANSI_CYAN))
 
     lines.append("")
-    dest_entry_count = len(destination_state.entries)
-    if dest_entry_count:
-        lines.append(_colorize(f"  Destination: {dest_entry_count} dirty file(s)", _ANSI_GREEN))
-        for entry in destination_state.entries:
-            lines.append(f"    [{entry.kind.value:<9}] [{entry.raw_xy}]  {entry.path}")
+    if peer_only:
+        lines.append(
+            _colorize(
+                f"  Peer repo: {len(peer_only)} dirty file(s)",
+                _ANSI_GREEN,
+            )
+        )
+        for entry in peer_only:
+            lines.append(
+                f"    [{entry.kind.value:<9}] [{_format_raw_xy(entry.raw_xy)}]  {entry.path}"
+            )
     else:
-        lines.append(_colorize("  Destination: clean", _ANSI_GREEN))
+        lines.append(_colorize("  Peer repo: clean", _ANSI_GREEN))
+
+    lines.append("")
+    if synced:
+        lines.append(
+            _colorize(
+                f"  Synced: {len(synced)} file(s) already matched on both sides",
+                _ANSI_MAGENTA,
+            )
+        )
+        lines.extend(
+            _comparison_table_lines(
+                tuple((entry.path, entry.source_xy, entry.dest_xy) for entry in synced),
+                direction=direction,
+            )
+        )
+    else:
+        lines.append(_colorize("  Synced: none", _ANSI_MAGENTA))
 
     lines.append("")
     if conflicts:
@@ -196,8 +335,14 @@ def format_status(
                 _ANSI_YELLOW,
             )
         )
-        for c in conflicts:
-            lines.append(f"    {c.path}  (source: {c.source_xy}, dest: {c.dest_xy})")
+        lines.extend(
+            _comparison_table_lines(
+                tuple(
+                    (conflict.path, conflict.source_xy, conflict.dest_xy) for conflict in conflicts
+                ),
+                direction=direction,
+            )
+        )
     else:
         lines.append(_colorize("  Conflicts: none", _ANSI_YELLOW))
 

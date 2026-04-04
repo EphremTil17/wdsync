@@ -33,10 +33,12 @@ class _FakePeerSession:
         *,
         compare_result: HeadRelation = HeadRelation.DIFFERENT,
         manifest_paths: frozenset[str] = frozenset(),
+        fingerprints: dict[str, str | None] | None = None,
     ) -> None:
         self._state = state
         self._compare_result = compare_result
         self._manifest_paths = manifest_paths
+        self._fingerprints = fingerprints or {}
         self.compared: list[tuple[str, str]] = []
 
     def status(self) -> DestinationState:
@@ -49,10 +51,22 @@ class _FakePeerSession:
         self.compared.append((source_head, destination_head))
         return self._compare_result
 
+    def fingerprint_paths(self, paths: tuple[str, ...]) -> dict[str, str | None]:
+        return {path: self._fingerprints.get(path) for path in paths}
+
 
 def _head(repo: Path) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _fingerprint(repo: Path, path: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "hash-object", "--path", path, str(repo / path)],
         check=True,
         capture_output=True,
         text=True,
@@ -164,6 +178,39 @@ def test_build_sync_context_uses_remote_destination_and_detects_conflicts(
 
     assert ctx.destination_state == peer_state
     assert [conflict.path for conflict in ctx.conflicts] == ["tracked.txt"]
+
+
+def test_build_sync_context_suppresses_conflicts_when_contents_match(
+    repo_factory: Callable[..., Path],
+    git_runner: CommandRunner,
+    tmp_path: Path,
+) -> None:
+    local_repo = repo_factory("source", files={"tracked.txt": "base\n"})
+    (local_repo / "tracked.txt").write_text("same change\n", encoding="utf-8")
+    peer_state = DestinationState(
+        head="peer-head",
+        modified_count=1,
+        staged_count=0,
+        untracked_count=0,
+        dirty_paths=frozenset({"tracked.txt"}),
+        wt_deleted_paths=frozenset(),
+        entries=(
+            StatusRecord(raw_xy=" M", path="tracked.txt", orig_path=None, kind=StatusKind.UNSTAGED),
+        ),
+    )
+    peer_session = _FakePeerSession(
+        peer_state,
+        fingerprints={"tracked.txt": _fingerprint(local_repo, "tracked.txt")},
+    )
+
+    ctx = build_sync_context(
+        _send_dconfig(local_repo),
+        git_runner,
+        tmp_path / "state",
+        peer_session=cast(PeerSession, peer_session),
+    )
+
+    assert ctx.conflicts == ()
 
 
 def test_build_sync_context_requires_peer_session_for_remote_repo(
